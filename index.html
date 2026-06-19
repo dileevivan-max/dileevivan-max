@@ -202,7 +202,26 @@ input:disabled{color:#A8A290;border-color:var(--line-soft)}
 </style>
 </head>
 <body>
-<div id="branch-picker-screen" style="display:none;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.5rem">
+<div id="login-screen" style="display:none;min-height:100vh;align-items:center;justify-content:center;padding:1.5rem">
+  <div class="card" style="max-width:400px;width:100%;padding:2.2rem 1.8rem">
+    <div style="text-align:center;margin-bottom:1.5rem">
+      <div class="brand-mark" style="margin:0 auto 14px">ПВ</div>
+      <div style="font-family:'Archivo',sans-serif;font-weight:700;font-size:18px">Полевой журнал</div>
+      <div style="font-size:13px;color:var(--ink-soft);margin-top:4px">Войдите, чтобы продолжить</div>
+    </div>
+    <div class="form-field" style="margin-bottom:14px">
+      <label>Email</label>
+      <input id="login-email" type="text" placeholder="имя_фамилия@resanta.ru" autocomplete="username">
+    </div>
+    <div class="form-field" style="margin-bottom:18px">
+      <label>Пароль</label>
+      <input id="login-password" type="password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter'){doLogin();}">
+    </div>
+    <div id="login-error" style="display:none;background:var(--r1-bg);color:#993C1D;font-size:12.5px;padding:9px 12px;border-radius:8px;margin-bottom:14px"></div>
+    <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center" onclick="doLogin()" id="login-btn"><i class="ti ti-login-2"></i> Войти</button>
+  </div>
+</div>
+<div id="branch-picker-screen" style="display:none;min-height:100vh;align-items:center;justify-content:center;padding:1.5rem">
   <div class="card" style="max-width:420px;width:100%;text-align:center;padding:2.2rem 1.8rem">
     <i class="ti ti-building-skyscraper" style="font-size:34px;color:var(--indigo);display:block;margin-bottom:14px"></i>
     <div style="font-family:'Archivo',sans-serif;font-weight:700;font-size:17px;margin-bottom:6px">Выберите филиал</div>
@@ -224,6 +243,7 @@ input:disabled{color:#A8A290;border-color:var(--line-soft)}
       <div id="sync-indicator" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-soft);display:flex;align-items:center;gap:5px;opacity:0;transition:opacity .3s"></div>
       <button class="tag" id="branch-switch-btn" onclick="switchBranch()" style="display:flex;align-items:center;gap:5px"><i class="ti ti-building-skyscraper" style="font-size:13px"></i><span id="branch-switch-label"></span></button>
       <button class="btn-export" onclick="exportData()"><i class="ti ti-download"></i> Экспорт CSV</button>
+      <button class="del-btn" title="Выйти" onclick="if(confirm('Выйти из учётной записи?'))logout();"><i class="ti ti-logout"></i></button>
     </div>
   </div>
 
@@ -302,21 +322,80 @@ let filterMgr="all", sumFilterMgr="all", anaMetric="total";
 /* ===================== Supabase connection ===================== */
 const SUPABASE_URL="https://vhyqflodenxfvossbtqc.supabase.co";
 const SUPABASE_KEY="sb_publishable_Hwdd3YafA745DGHg473A5g_JJA_U74G";
-const SB_HEADERS={
-  "apikey":SUPABASE_KEY,
-  "Authorization":"Bearer "+SUPABASE_KEY,
-  "Content-Type":"application/json",
-  "Prefer":"return=minimal"
-};
-async function sbRequest(path,method,body){
+let currentSession=null; // {access_token, user:{id,email}}
+let currentUserBranch=null; // 'Алматы' | 'Астана' | 'Караганда' | 'all'
+let currentUserFullName=null;
+
+function sbHeaders(){
+  return {
+    "apikey":SUPABASE_KEY,
+    "Authorization":"Bearer "+(currentSession?currentSession.access_token:SUPABASE_KEY),
+    "Content-Type":"application/json",
+    "Prefer":"return=minimal"
+  };
+}
+async function sbRequest(path,method,body,_retried){
   try{
-    const opts={method:method||"GET",headers:SB_HEADERS};
+    const opts={method:method||"GET",headers:sbHeaders()};
     if(body!==undefined){ opts.body=JSON.stringify(body); }
     const res=await fetch(SUPABASE_URL+"/rest/v1/"+path,opts);
+    if(res.status===401 && !_retried){
+      const refreshed=await sbRefreshSession();
+      if(refreshed) return sbRequest(path,method,body,true);
+    }
     if(!res.ok){ console.error("Supabase error",path,res.status,await res.text()); return null; }
     const text=await res.text();
     return text?JSON.parse(text):null;
   }catch(e){ console.error("Supabase request failed",e); return null; }
+}
+async function sbRefreshSession(){
+  if(!currentSession||!currentSession.refresh_token)return false;
+  try{
+    const res=await fetch(SUPABASE_URL+"/auth/v1/token?grant_type=refresh_token",{
+      method:"POST",
+      headers:{"apikey":SUPABASE_KEY,"Content-Type":"application/json"},
+      body:JSON.stringify({refresh_token:currentSession.refresh_token})
+    });
+    if(!res.ok)return false;
+    currentSession=await res.json();
+    saveSessionLocal();
+    return true;
+  }catch(e){ return false; }
+}
+
+/* ----- Auth ----- */
+async function sbLogin(email,password){
+  try{
+    const res=await fetch(SUPABASE_URL+"/auth/v1/token?grant_type=password",{
+      method:"POST",
+      headers:{"apikey":SUPABASE_KEY,"Content-Type":"application/json"},
+      body:JSON.stringify({email,password})
+    });
+    if(!res.ok){ return {error:true}; }
+    const data=await res.json();
+    return {error:false, session:data};
+  }catch(e){ return {error:true}; }
+}
+async function fetchUserBranch(userId){
+  const arr=await sbRequest("user_branches?select=branch,full_name&user_id=eq."+userId,"GET");
+  return arr&&arr.length?arr[0]:null;
+}
+function saveSessionLocal(){
+  try{ localStorage.setItem("fv_session",JSON.stringify(currentSession)); }catch(e){}
+}
+function loadSessionLocal(){
+  try{ const s=localStorage.getItem("fv_session"); if(s)currentSession=JSON.parse(s); }catch(e){}
+}
+function clearSessionLocal(){
+  try{ localStorage.removeItem("fv_session"); }catch(e){}
+}
+function logout(){
+  currentSession=null; currentUserBranch=null; currentUserFullName=null; currentBranch=null;
+  clearSessionLocal();
+  try{ localStorage.removeItem("fv_current_branch"); }catch(e){}
+  document.getElementById("main-app").style.display="none";
+  document.getElementById("branch-picker-screen").style.display="none";
+  document.getElementById("login-screen").style.display="flex";
 }
 function showSyncIndicator(state){
   const el=document.getElementById("sync-indicator");
@@ -329,11 +408,12 @@ function showSyncIndicator(state){
 /* ----- Load all data from Supabase on startup ----- */
 async function loadData(){
   showSyncIndicator("syncing");
-  const branchFilter="branch=eq."+encodeURIComponent(currentBranch);
+  const viewingAll=(currentBranch==="__ALL__");
+  const branchFilter=viewingAll?"":"&branch=eq."+encodeURIComponent(currentBranch);
   const [daysRaw,clientsRaw,tasksRaw]=await Promise.all([
-    sbRequest("days?select=*&"+branchFilter+"&order=date.desc,id.desc","GET"),
-    sbRequest("clients?select=*&"+branchFilter,"GET"),
-    sbRequest("tasks?select=*&"+branchFilter+"&order=id.desc","GET")
+    sbRequest("days?select=*"+branchFilter+"&order=date.desc,id.desc","GET"),
+    sbRequest("clients?select=*"+branchFilter,"GET"),
+    sbRequest("tasks?select=*"+branchFilter+"&order=id.desc","GET")
   ]);
   days=(daysRaw||[]).map(d=>({
     id:d.id, mgr:d.mgr, district:d.district, date:d.date, startTime:d.start_time,
@@ -352,7 +432,8 @@ async function loadData(){
   clients=(clientsRaw||[]).map(c=>({name:c.name,district:c.district||""}));
   tasks=(tasksRaw||[]).map(t=>({id:t.id,client:t.client,mgr:t.mgr||"",text:t.text,status:t.status||"open",date:t.date}));
   // active day comes from the cloud: the most recent day still marked open
-  const openDay=days.find(d=>d.isOpen);
+  // in "all branches" view, "today" tab/checklist creation is disabled — see renderTodayTab
+  const openDay=viewingAll?null:days.find(d=>d.isOpen);
   currentDayId=openDay?openDay.id:null;
   saveCurrentDay();
   showSyncIndicator("done");
@@ -363,7 +444,7 @@ async function sbUpsert(table,payload){
   try{
     const res=await fetch(SUPABASE_URL+"/rest/v1/"+table,{
       method:"POST",
-      headers:{...SB_HEADERS,"Prefer":"resolution=merge-duplicates,return=minimal"},
+      headers:{...sbHeaders(),"Prefer":"resolution=merge-duplicates,return=minimal"},
       body:JSON.stringify(payload)
     });
     return res.ok;
@@ -371,7 +452,7 @@ async function sbUpsert(table,payload){
 }
 async function sbDelete(table,id){
   try{
-    const res=await fetch(SUPABASE_URL+"/rest/v1/"+table+"?id=eq."+id,{method:"DELETE",headers:SB_HEADERS});
+    const res=await fetch(SUPABASE_URL+"/rest/v1/"+table+"?id=eq."+id,{method:"DELETE",headers:sbHeaders()});
     return res.ok;
   }catch(e){ console.error("sbDelete failed",table,e); return false; }
 }
@@ -435,6 +516,14 @@ function getCurrentDay(){ return days.find(d=>d.id===currentDayId)||null; }
 
 function renderTodayTab(){
   const el=document.getElementById("tab-today");
+  if(currentBranch==="__ALL__"){
+    el.innerHTML='<div class="card" style="text-align:center;padding:2.4rem 1.5rem">'+
+      '<i class="ti ti-world" style="font-size:36px;color:var(--indigo);display:block;margin-bottom:14px"></i>'+
+      '<div style="font-family:\'Archivo\',sans-serif;font-weight:700;font-size:16px;margin-bottom:7px">Сводный режим «Все филиалы»</div>'+
+      '<div style="font-size:13px;color:var(--ink-soft);max-width:420px;margin:0 auto">Создание нового чек-листа дня привязано к конкретному филиалу. Переключитесь на отдельный филиал (кнопка вверху), чтобы начать новый день, или используйте вкладки «История», «Итоги» и «Аналитика» для просмотра данных по всем филиалам сразу.</div>'+
+    '</div>';
+    return;
+  }
   const day=getCurrentDay();
   if(!day){
     el.innerHTML=renderCreateDayPrompt();
@@ -854,10 +943,16 @@ function switchTab(name,el){
 
 function getAllVisitsFlat(){
   const flat=[];
-  days.forEach(d=>d.visits.forEach(v=>{ flat.push({...v,mgr:d.mgr,district:d.district,dayId:d.id}); }));
+  days.forEach(d=>d.visits.forEach(v=>{ flat.push({...v,mgr:d.mgr,district:d.district,branch:d.branch,dayId:d.id}); }));
   return flat;
 }
-function getMgrs(){return["all",...(MANAGERS_BY_BRANCH[currentBranch]||[]).filter(m=>days.some(d=>d.mgr===m))];}
+function getMgrs(){
+  if(currentBranch==="__ALL__"){
+    const allMgrs=Object.values(MANAGERS_BY_BRANCH).flat();
+    return["all",...allMgrs.filter(m=>days.some(d=>d.mgr===m))];
+  }
+  return["all",...(MANAGERS_BY_BRANCH[currentBranch]||[]).filter(m=>days.some(d=>d.mgr===m))];
+}
 function renderMgrTags(cid,cur,set,cb){
   const c=document.getElementById(cid);c.innerHTML="";
   getMgrs().forEach(m=>{const t=document.createElement("button");t.className="tag"+(cur===m?" active":"");t.textContent=m==="all"?"Все":m;t.onclick=()=>{set(m);cb();};c.appendChild(t);});
@@ -869,6 +964,7 @@ function renderHistory(){
   const flat=getAllVisitsFlat().filter(v=>filterMgr==="all"||v.mgr===filterMgr).sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id);
   if(!flat.length){list.innerHTML='<div class="empty"><i class="ti ti-inbox"></i>Визитов пока нет</div>';return;}
   list.innerHTML="";
+  const showBranch=(currentBranch==="__ALL__");
   flat.forEach(v=>{
     const avg=(v.total/VISIT_MAX*5).toFixed(1);
     const weak=VISIT_ITEMS.filter(i=>(v.scores[i]||0)<=2);
@@ -876,7 +972,7 @@ function renderHistory(){
     d.innerHTML=
       '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">'+
       '<div style="flex:1;min-width:180px">'+
-        '<div style="font-family:\'Archivo\',sans-serif;font-weight:700;font-size:15px">'+esc(v.mgr)+' — '+esc(v.client)+(v.district?' <span class="district-chip"><i class="ti ti-map-pin" style="font-size:10.5px"></i>'+esc(v.district)+'</span>':"")+'</div>'+
+        '<div style="font-family:\'Archivo\',sans-serif;font-weight:700;font-size:15px">'+esc(v.mgr)+' — '+esc(v.client)+(showBranch&&v.branch?' <span class="district-chip" style="background:var(--ink);color:#fff"><i class="ti ti-building-skyscraper" style="font-size:10.5px"></i>'+esc(v.branch)+'</span>':"")+(v.district?' <span class="district-chip"><i class="ti ti-map-pin" style="font-size:10.5px"></i>'+esc(v.district)+'</span>':"")+'</div>'+
         '<div style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;color:var(--ink-soft);margin-top:4px"><i class="ti ti-calendar" style="margin-right:3px;font-size:12px"></i>'+fd(v.date)+(v.note?' &nbsp;·&nbsp; '+esc(v.note):"")+' </div>'+
         (weak.length?'<div class="weak-alert"><i class="ti ti-target-arrow"></i><span><b>Над чем поработать в следующий визит:</b> '+weak.slice(0,4).map(esc).join(", ")+(weak.length>4?' +ещё '+(weak.length-4):"")+' </span></div>':"")+
       '</div>'+
@@ -1089,28 +1185,76 @@ function exportData(){
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="полевые_визиты.csv";a.click();
 }
 
-/* ----- Branch selection ----- */
-function loadCurrentBranch(){
-  try{ const b=localStorage.getItem("fv_current_branch"); if(b && BRANCHES.includes(b)) currentBranch=b; }catch(e){}
+/* ----- Login ----- */
+async function doLogin(){
+  const email=document.getElementById("login-email").value.trim();
+  const password=document.getElementById("login-password").value;
+  const errEl=document.getElementById("login-error");
+  const btn=document.getElementById("login-btn");
+  errEl.style.display="none";
+  if(!email||!password){ errEl.textContent="Введите email и пароль"; errEl.style.display="block"; return; }
+  btn.disabled=true; btn.innerHTML='<i class="ti ti-loader-2"></i> Вход...';
+  const result=await sbLogin(email,password);
+  btn.disabled=false; btn.innerHTML='<i class="ti ti-login-2"></i> Войти';
+  if(result.error){
+    errEl.textContent="Неверный email или пароль";
+    errEl.style.display="block";
+    return;
+  }
+  currentSession=result.session;
+  saveSessionLocal();
+  await afterLogin();
 }
-function saveCurrentBranchLocal(){ try{ localStorage.setItem("fv_current_branch",currentBranch); }catch(e){} }
+async function afterLogin(){
+  const userInfo=await fetchUserBranch(currentSession.user.id);
+  if(!userInfo){
+    document.getElementById("login-error").textContent="Учётная запись не привязана к филиалу. Обратитесь к администратору.";
+    document.getElementById("login-error").style.display="block";
+    logout();
+    return;
+  }
+  currentUserBranch=userInfo.branch;
+  currentUserFullName=userInfo.full_name||"";
+  document.getElementById("login-screen").style.display="none";
 
+  if(currentUserBranch==="all"){
+    // network head: must choose which branch to view, can switch freely
+    document.getElementById("branch-picker-screen").style.display="flex";
+    renderBranchPicker();
+  } else {
+    // branch manager: locked to their own branch, no picker shown
+    currentBranch=currentUserBranch;
+    document.getElementById("main-app").style.display="block";
+    document.getElementById("branch-switch-btn").style.display="none";
+    document.getElementById("tab-today").innerHTML='<div class="empty"><i class="ti ti-cloud-download"></i>Загрузка данных из облака...</div>';
+    await loadData();
+    renderTodayTab();
+  }
+}
+
+/* ----- Branch selection (only relevant for currentUserBranch === 'all') ----- */
 function renderBranchPicker(){
   const area=document.getElementById("branch-options");
-  area.innerHTML=BRANCHES.map(b=>'<button class="btn btn-lg" style="justify-content:flex-start" onclick="selectBranch(\''+b+'\')"><i class="ti ti-map-pin"></i> '+b+'</button>').join("");
+  area.innerHTML=
+    '<button class="btn btn-lg" style="justify-content:flex-start;border-color:var(--indigo);color:var(--indigo)" onclick="selectBranch(\'__ALL__\')"><i class="ti ti-world"></i> Все филиалы (сводно)</button>'+
+    '<div style="height:1px;background:var(--line-soft);margin:4px 0"></div>'+
+    BRANCHES.map(b=>'<button class="btn btn-lg" style="justify-content:flex-start" onclick="selectBranch(\''+b+'\')"><i class="ti ti-map-pin"></i> '+b+'</button>').join("");
+}
+function branchSwitchLabel(){
+  return currentBranch==="__ALL__" ? "Все филиалы" : currentBranch;
 }
 async function selectBranch(branch){
   currentBranch=branch;
-  saveCurrentBranchLocal();
   document.getElementById("branch-picker-screen").style.display="none";
   document.getElementById("main-app").style.display="block";
-  document.getElementById("branch-switch-label").textContent=currentBranch;
+  document.getElementById("branch-switch-btn").style.display="flex";
+  document.getElementById("branch-switch-label").textContent=branchSwitchLabel();
   document.getElementById("tab-today").innerHTML='<div class="empty"><i class="ti ti-cloud-download"></i>Загрузка данных из облака...</div>';
   await loadData();
   renderTodayTab();
 }
 function switchBranch(){
-  if(!confirm("Сменить филиал? Текущий день будет скрыт (но не удалён) — он останется доступен, если вернуться в "+currentBranch+"."))return;
+  // only reachable for currentUserBranch === 'all'
   currentDayId=null; currentVisitId=null;
   document.getElementById("main-app").style.display="none";
   document.getElementById("branch-picker-screen").style.display="flex";
@@ -1118,17 +1262,12 @@ function switchBranch(){
 }
 
 async function startApp(){
-  loadCurrentBranch();
-  if(currentBranch){
-    document.getElementById("main-app").style.display="block";
-    document.getElementById("branch-switch-label").textContent=currentBranch;
-    document.getElementById("tab-today").innerHTML='<div class="empty"><i class="ti ti-cloud-download"></i>Загрузка данных из облака...</div>';
-    await loadData();
-    renderTodayTab();
-  } else {
-    document.getElementById("branch-picker-screen").style.display="flex";
-    renderBranchPicker();
+  loadSessionLocal();
+  if(!currentSession){
+    document.getElementById("login-screen").style.display="flex";
+    return;
   }
+  await afterLogin();
 }
 startApp();
 </script>

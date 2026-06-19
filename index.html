@@ -202,7 +202,15 @@ input:disabled{color:#A8A290;border-color:var(--line-soft)}
 </style>
 </head>
 <body>
-<div class="container">
+<div id="branch-picker-screen" style="display:none;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.5rem">
+  <div class="card" style="max-width:420px;width:100%;text-align:center;padding:2.2rem 1.8rem">
+    <i class="ti ti-building-skyscraper" style="font-size:34px;color:var(--indigo);display:block;margin-bottom:14px"></i>
+    <div style="font-family:'Archivo',sans-serif;font-weight:700;font-size:17px;margin-bottom:6px">Выберите филиал</div>
+    <div style="font-size:13px;color:var(--ink-soft);margin-bottom:20px">Список МПП и все данные будут показаны только для выбранного филиала.</div>
+    <div id="branch-options" style="display:flex;flex-direction:column;gap:10px"></div>
+  </div>
+</div>
+<div class="container" id="main-app" style="display:none">
 
   <div class="masthead">
     <div class="masthead-left">
@@ -214,6 +222,7 @@ input:disabled{color:#A8A290;border-color:var(--line-soft)}
     </div>
     <div style="display:flex;align-items:center;gap:12px">
       <div id="sync-indicator" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-soft);display:flex;align-items:center;gap:5px;opacity:0;transition:opacity .3s"></div>
+      <button class="tag" id="branch-switch-btn" onclick="switchBranch()" style="display:flex;align-items:center;gap:5px"><i class="ti ti-building-skyscraper" style="font-size:13px"></i><span id="branch-switch-label"></span></button>
       <button class="btn-export" onclick="exportData()"><i class="ti ti-download"></i> Экспорт CSV</button>
     </div>
   </div>
@@ -257,7 +266,13 @@ input:disabled{color:#A8A290;border-color:var(--line-soft)}
 </div>
 
 <script>
-const MANAGERS=["Полухина Ольга Владимировна","Попов Дмитрий Олегович","Нурболатов Абзал Нурланович","Аббасов Алихан Куштанович","Шустов Вадим Олегович"];
+const BRANCHES=["Алматы","Астана","Караганда"];
+const MANAGERS_BY_BRANCH={
+  "Алматы":["Полухина Ольга Владимировна","Попов Дмитрий Олегович","Нурболатов Абзал Нурланович","Аббасов Алихан Куштанович","Шустов Вадим Олегович"],
+  "Астана":["Пугачёв Виталий Александрович","Фисюков Владимир Николаевич","Порот Валерий Ильич","Полюх Владимир Александрович"],
+  "Караганда":["Висингириев Рустам Шарипович","Хижняков Анатолий Константинович"]
+};
+let currentBranch=null;
 
 /* Day-level criteria: route readiness (yes/no) */
 const ROUTE_READINESS=["Наличие каталогов","Наличие договоров и доп. соглашений","Наличие образцов","Знание планов","Знание действующих акций"];
@@ -314,20 +329,25 @@ function showSyncIndicator(state){
 /* ----- Load all data from Supabase on startup ----- */
 async function loadData(){
   showSyncIndicator("syncing");
-  const [daysRaw,visitsRaw,clientsRaw,tasksRaw]=await Promise.all([
-    sbRequest("days?select=*&order=date.desc,id.desc","GET"),
-    sbRequest("visits?select=*","GET"),
-    sbRequest("clients?select=*","GET"),
-    sbRequest("tasks?select=*&order=id.desc","GET")
+  const branchFilter="branch=eq."+encodeURIComponent(currentBranch);
+  const [daysRaw,clientsRaw,tasksRaw]=await Promise.all([
+    sbRequest("days?select=*&"+branchFilter+"&order=date.desc,id.desc","GET"),
+    sbRequest("clients?select=*&"+branchFilter,"GET"),
+    sbRequest("tasks?select=*&"+branchFilter+"&order=id.desc","GET")
   ]);
   days=(daysRaw||[]).map(d=>({
     id:d.id, mgr:d.mgr, district:d.district, date:d.date, startTime:d.start_time,
-    readiness:d.readiness||{}, theory:d.theory||{}, isOpen:(d.is_open!==false),
+    readiness:d.readiness||{}, theory:d.theory||{}, isOpen:(d.is_open!==false), branch:d.branch||currentBranch,
     visits:[]
   }));
-  const visitsList=(visitsRaw||[]).map(v=>({
-    id:v.id, dayIdRef:v.day_id, client:v.client, note:v.note||"", scores:v.scores||{}, total:v.total||0, date:v.date
-  }));
+  const dayIds=days.map(d=>d.id);
+  let visitsList=[];
+  if(dayIds.length){
+    const visitsRaw=await sbRequest("visits?select=*&day_id=in.("+dayIds.join(",")+")","GET");
+    visitsList=(visitsRaw||[]).map(v=>({
+      id:v.id, dayIdRef:v.day_id, client:v.client, note:v.note||"", scores:v.scores||{}, total:v.total||0, date:v.date
+    }));
+  }
   days.forEach(d=>{ d.visits=visitsList.filter(v=>v.dayIdRef===d.id).map(v=>({id:v.id,client:v.client,note:v.note,scores:v.scores,total:v.total,date:v.date})); });
   clients=(clientsRaw||[]).map(c=>({name:c.name,district:c.district||""}));
   tasks=(tasksRaw||[]).map(t=>({id:t.id,client:t.client,mgr:t.mgr||"",text:t.text,status:t.status||"open",date:t.date}));
@@ -361,7 +381,7 @@ async function saveDays(){
   showSyncIndicator("syncing");
   let allOk=true;
   for(const day of days){
-    const dayPayload={id:day.id,mgr:day.mgr,district:day.district,date:day.date,start_time:day.startTime||null,readiness:day.readiness,theory:day.theory,is_open:day.isOpen!==false};
+    const dayPayload={id:day.id,mgr:day.mgr,district:day.district,date:day.date,start_time:day.startTime||null,readiness:day.readiness,theory:day.theory,is_open:day.isOpen!==false,branch:day.branch||currentBranch};
     const ok1=await sbUpsert("days",dayPayload);
     if(!ok1)allOk=false;
     for(const v of day.visits){
@@ -376,7 +396,7 @@ async function saveClients(){
   showSyncIndicator("syncing");
   let allOk=true;
   for(const c of clients){
-    const ok=await sbUpsert("clients",{name:c.name,district:c.district||null});
+    const ok=await sbUpsert("clients",{name:c.name,district:c.district||null,branch:currentBranch});
     if(!ok)allOk=false;
   }
   showSyncIndicator(allOk?"done":"error");
@@ -385,7 +405,7 @@ async function saveTasks(){
   showSyncIndicator("syncing");
   let allOk=true;
   for(const t of tasks){
-    const ok=await sbUpsert("tasks",{id:t.id,client:t.client,mgr:t.mgr||null,text:t.text,status:t.status,date:t.date});
+    const ok=await sbUpsert("tasks",{id:t.id,client:t.client,mgr:t.mgr||null,text:t.text,status:t.status,date:t.date,branch:currentBranch});
     if(!ok)allOk=false;
   }
   showSyncIndicator(allOk?"done":"error");
@@ -444,7 +464,7 @@ function showCreateDayForm(){
   const hh=String(now.getHours()).padStart(2,"0"), mm=String(now.getMinutes()).padStart(2,"0");
   area.innerHTML='<div class="form-grid" style="text-align:left;max-width:420px;margin:0 auto">'+
     '<div class="form-field"><label>МПП</label><select id="day-mgr" class="field-select">'+
-      '<option value="">— выберите МПП —</option>'+MANAGERS.map(m=>'<option value="'+esc(m)+'">'+esc(m)+'</option>').join("")+
+      '<option value="">— выберите МПП —</option>'+(MANAGERS_BY_BRANCH[currentBranch]||[]).map(m=>'<option value="'+esc(m)+'">'+esc(m)+'</option>').join("")+
     '</select></div>'+
     '<div class="form-field"><label>Район</label><input id="day-district" type="text" placeholder="Например: Алмалинский р-н"></div>'+
     '<div class="form-field"><label>Дата (сегодня)</label><input id="day-date" type="date"></div>'+
@@ -463,7 +483,7 @@ function createDay(){
   if(!mgr||!district||!date){alert("Укажите МПП, район и дату");return;}
   const readiness={}; ROUTE_READINESS.forEach(r=>readiness[r]=null);
   const theory={}; THEORY_ITEMS.forEach(t=>theory[t]=0);
-  const day={id:Date.now(),mgr,district,date,startTime,readiness,theory,isOpen:true,visits:[]};
+  const day={id:Date.now(),mgr,district,date,startTime,readiness,theory,isOpen:true,branch:currentBranch,visits:[]};
   days.unshift(day);
   currentDayId=day.id; currentVisitId=null;
   saveDays(); saveCurrentDay();
@@ -475,7 +495,7 @@ function closeDay(){
   const day=getCurrentDay();
   if(day){
     day.isOpen=false;
-    sbUpsert("days",{id:day.id,mgr:day.mgr,district:day.district,date:day.date,start_time:day.startTime||null,readiness:day.readiness,theory:day.theory,is_open:false});
+    sbUpsert("days",{id:day.id,mgr:day.mgr,district:day.district,date:day.date,start_time:day.startTime||null,readiness:day.readiness,theory:day.theory,is_open:false,branch:day.branch||currentBranch});
   }
   currentDayId=null; currentVisitId=null;
   saveCurrentDay();
@@ -837,7 +857,7 @@ function getAllVisitsFlat(){
   days.forEach(d=>d.visits.forEach(v=>{ flat.push({...v,mgr:d.mgr,district:d.district,dayId:d.id}); }));
   return flat;
 }
-function getMgrs(){return["all",...MANAGERS.filter(m=>days.some(d=>d.mgr===m))];}
+function getMgrs(){return["all",...(MANAGERS_BY_BRANCH[currentBranch]||[]).filter(m=>days.some(d=>d.mgr===m))];}
 function renderMgrTags(cid,cur,set,cb){
   const c=document.getElementById(cid);c.innerHTML="";
   getMgrs().forEach(m=>{const t=document.createElement("button");t.className="tag"+(cur===m?" active":"");t.textContent=m==="all"?"Все":m;t.onclick=()=>{set(m);cb();};c.appendChild(t);});
@@ -1069,10 +1089,46 @@ function exportData(){
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="полевые_визиты.csv";a.click();
 }
 
-async function startApp(){
+/* ----- Branch selection ----- */
+function loadCurrentBranch(){
+  try{ const b=localStorage.getItem("fv_current_branch"); if(b && BRANCHES.includes(b)) currentBranch=b; }catch(e){}
+}
+function saveCurrentBranchLocal(){ try{ localStorage.setItem("fv_current_branch",currentBranch); }catch(e){} }
+
+function renderBranchPicker(){
+  const area=document.getElementById("branch-options");
+  area.innerHTML=BRANCHES.map(b=>'<button class="btn btn-lg" style="justify-content:flex-start" onclick="selectBranch(\''+b+'\')"><i class="ti ti-map-pin"></i> '+b+'</button>').join("");
+}
+async function selectBranch(branch){
+  currentBranch=branch;
+  saveCurrentBranchLocal();
+  document.getElementById("branch-picker-screen").style.display="none";
+  document.getElementById("main-app").style.display="block";
+  document.getElementById("branch-switch-label").textContent=currentBranch;
   document.getElementById("tab-today").innerHTML='<div class="empty"><i class="ti ti-cloud-download"></i>Загрузка данных из облака...</div>';
   await loadData();
   renderTodayTab();
+}
+function switchBranch(){
+  if(!confirm("Сменить филиал? Текущий день будет скрыт (но не удалён) — он останется доступен, если вернуться в "+currentBranch+"."))return;
+  currentDayId=null; currentVisitId=null;
+  document.getElementById("main-app").style.display="none";
+  document.getElementById("branch-picker-screen").style.display="flex";
+  renderBranchPicker();
+}
+
+async function startApp(){
+  loadCurrentBranch();
+  if(currentBranch){
+    document.getElementById("main-app").style.display="block";
+    document.getElementById("branch-switch-label").textContent=currentBranch;
+    document.getElementById("tab-today").innerHTML='<div class="empty"><i class="ti ti-cloud-download"></i>Загрузка данных из облака...</div>';
+    await loadData();
+    renderTodayTab();
+  } else {
+    document.getElementById("branch-picker-screen").style.display="flex";
+    renderBranchPicker();
+  }
 }
 startApp();
 </script>

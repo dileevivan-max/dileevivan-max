@@ -458,7 +458,7 @@ async function sbDelete(table,id){
 }
 
 async function saveDays(){
-  // saveDays is called broadly across the app; push current state of all days+visits to cloud
+  // legacy broad sync kept only as a fallback; prefer saveDayOnly/saveVisitOnly for targeted writes
   showSyncIndicator("syncing");
   let allOk=true;
   for(const day of days){
@@ -473,6 +473,20 @@ async function saveDays(){
   }
   showSyncIndicator(allOk?"done":"error");
 }
+async function saveDayOnly(day){
+  showSyncIndicator("syncing");
+  const dayPayload={id:day.id,mgr:day.mgr,district:day.district,date:day.date,start_time:day.startTime||null,readiness:day.readiness,theory:day.theory,is_open:day.isOpen!==false,branch:day.branch||currentBranch};
+  const ok=await sbUpsert("days",dayPayload);
+  showSyncIndicator(ok?"done":"error");
+  return ok;
+}
+async function saveVisitOnly(dayId,visit){
+  showSyncIndicator("syncing");
+  const visitPayload={id:visit.id,day_id:dayId,client:visit.client,note:visit.note||"",scores:visit.scores,total:visit.total,date:visit.date};
+  const ok=await sbUpsert("visits",visitPayload);
+  showSyncIndicator(ok?"done":"error");
+  return ok;
+}
 async function saveClients(){
   showSyncIndicator("syncing");
   let allOk=true;
@@ -482,6 +496,12 @@ async function saveClients(){
   }
   showSyncIndicator(allOk?"done":"error");
 }
+async function saveClientOnly(client){
+  showSyncIndicator("syncing");
+  const ok=await sbUpsert("clients",{name:client.name,district:client.district||null,branch:currentBranch});
+  showSyncIndicator(ok?"done":"error");
+  return ok;
+}
 async function saveTasks(){
   showSyncIndicator("syncing");
   let allOk=true;
@@ -490,6 +510,12 @@ async function saveTasks(){
     if(!ok)allOk=false;
   }
   showSyncIndicator(allOk?"done":"error");
+}
+async function saveTaskOnly(task){
+  showSyncIndicator("syncing");
+  const ok=await sbUpsert("tasks",{id:task.id,client:task.client,mgr:task.mgr||null,text:task.text,status:task.status,date:task.date,branch:currentBranch});
+  showSyncIndicator(ok?"done":"error");
+  return ok;
 }
 function saveCurrentDay(){try{localStorage.setItem("fv_current_day",JSON.stringify(currentDayId));}catch(e){}}
 function norm(s){return (s||"").trim().toLowerCase();}
@@ -575,7 +601,7 @@ function createDay(){
   const day={id:Date.now(),mgr,district,date,startTime,readiness,theory,isOpen:true,branch:currentBranch,visits:[]};
   days.unshift(day);
   currentDayId=day.id; currentVisitId=null;
-  saveDays(); saveCurrentDay();
+  saveDayOnly(day); saveCurrentDay();
   renderTodayTab();
 }
 
@@ -637,7 +663,7 @@ function setReadiness(dayId,idx,val){
   const day=days.find(d=>d.id===dayId); if(!day)return;
   const item=ROUTE_READINESS[idx];
   day.readiness[item]=val;
-  saveDays();
+  saveDayOnly(day);
   renderRouteReadiness(day);
 }
 
@@ -659,7 +685,7 @@ function setTheoryScore(dayId,idx,val){
   const day=days.find(d=>d.id===dayId); if(!day)return;
   const item=THEORY_ITEMS[idx];
   day.theory[item]=val;
-  saveDays();
+  saveDayOnly(day);
   renderTheoryBlock(day);
 }
 
@@ -693,15 +719,16 @@ function startVisitForClient(clientName){
   const day=getCurrentDay(); if(!day)return;
   // remember client globally for future dropdown use
   if(!clients.some(c=>norm(c.name)===norm(clientName))){
-    clients.push({name:clientName,district:day.district});
-    saveClients();
+    const newClient={name:clientName,district:day.district};
+    clients.push(newClient);
+    saveClientOnly(newClient);
   }
   visitScores={}; VISIT_ITEMS.forEach(i=>visitScores[i]=0);
   flaggedItems=[];
   const visit={id:Date.now(),client:clientName,note:"",scores:{...visitScores},total:0,date:day.date};
   day.visits.push(visit);
   currentVisitId=visit.id;
-  saveDays();
+  saveVisitOnly(day.id,visit);
   renderTodayTab();
   setTimeout(()=>{document.getElementById("visit-form-area").scrollIntoView({behavior:"smooth",block:"start"});},50);
 }
@@ -790,7 +817,7 @@ function updateVisitNote(){
   const day=getCurrentDay(); const visit=day.visits.find(v=>v.id===currentVisitId);
   if(!visit)return;
   visit.note=document.getElementById("visit-note").value.trim();
-  saveDays();
+  saveVisitOnly(day.id,visit);
 }
 
 function buildVisitCriteriaGrid(){
@@ -834,7 +861,7 @@ function saveCurrentVisit(){
   const visit=day.visits.find(v=>v.id===currentVisitId); if(!visit)return;
   visit.scores={...visitScores};
   visit.total=Object.values(visitScores).reduce((a,b)=>a+b,0);
-  saveDays();
+  saveVisitOnly(day.id,visit);
   showPostSaveSummary(visit);
   renderClientTabs(day);
 }
@@ -914,14 +941,15 @@ function addClientTask(){
   const text=document.getElementById("ctask-new-text").value.trim();
   if(!client||!text)return;
   const day=getCurrentDay();
-  tasks.unshift({id:Date.now(),client,mgr:day?day.mgr:"",text,status:"open",date:new Date().toISOString().slice(0,10)});
-  saveTasks();
+  const newTask={id:Date.now(),client,mgr:day?day.mgr:"",text,status:"open",date:new Date().toISOString().slice(0,10)};
+  tasks.unshift(newTask);
+  saveTaskOnly(newTask);
   renderClientTasksWidget(client);
 }
 function toggleTaskStatus(id){
   const t=tasks.find(x=>x.id===id); if(!t)return;
   t.status=t.status==="done"?"open":"done";
-  saveTasks();renderTasks();
+  saveTaskOnly(t);renderTasks();
 }
 function deleteTask(id){
   tasks=tasks.filter(t=>t.id!==id);

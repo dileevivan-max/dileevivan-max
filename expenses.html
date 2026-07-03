@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Расходы">
+<meta name="theme-color" content="#101418">
+<link rel="apple-touch-icon" href="expenses-icon.png">
+<title>Мои расходы</title>
+<style>
+  :root {
+    --bg: #101418;
+    --surface: #1a2027;
+    --surface-2: #232b34;
+    --border: #2e3843;
+    --text: #e8edf2;
+    --text-dim: #8b98a5;
+    --danger: #e5636c;
+    --radius: 14px;
+    /* акцент меняется в зависимости от кошелька */
+    --accent: #4f8ef7;
+    --accent-soft: rgba(79,142,247,.14);
+  }
+  body.wallet-personal {
+    --accent: #3ec98e;
+    --accent-soft: rgba(62,201,142,.14);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    max-width: 560px;
+    margin: 0 auto;
+    padding: calc(16px + env(safe-area-inset-top)) 16px calc(90px + env(safe-area-inset-bottom));
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* ── Вкладки кошельков ── */
+  .wallet-tabs {
+    display: flex;
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 5px;
+    gap: 5px;
+    margin-bottom: 18px;
+    border: 1px solid var(--border);
+  }
+  .wallet-tab {
+    flex: 1;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 15px;
+    font-weight: 600;
+    padding: 11px 0;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background .2s, color .2s;
+  }
+  .wallet-tab.active {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  /* ── Итог месяца ── */
+  .month-card {
+    background: linear-gradient(135deg, var(--surface) 0%, var(--surface-2) 100%);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px;
+    margin-bottom: 18px;
+  }
+  .month-card .label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+  .month-card .total {
+    font-size: 34px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+  }
+  .cat-bars { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+  .cat-bar-row { font-size: 13px; }
+  .cat-bar-head { display: flex; justify-content: space-between; margin-bottom: 3px; }
+  .cat-bar-head .n { color: var(--text); }
+  .cat-bar-head .v { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  .cat-bar-track { height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+  .cat-bar-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width .4s ease; }
+
+  /* ── Форма ввода ── */
+  .add-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 18px;
+  }
+  .add-card h2 { font-size: 14px; font-weight: 600; color: var(--text-dim); margin-bottom: 12px; text-transform: uppercase; letter-spacing: .06em; }
+  .amount-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .amount-input {
+    flex: 1;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    font-size: 26px;
+    font-weight: 700;
+    padding: 10px 14px;
+    width: 100%;
+    outline: none;
+    font-variant-numeric: tabular-nums;
+  }
+  .amount-input:focus { border-color: var(--accent); }
+  .currency { font-size: 22px; font-weight: 700; color: var(--text-dim); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .chip {
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: 14px;
+    padding: 8px 13px;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  .chip.selected {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .chip.add-chip { color: var(--text-dim); border-style: dashed; }
+
+  .comment-input, .date-input {
+    width: 100%;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    font-size: 16px;
+    padding: 10px 12px;
+    outline: none;
+    margin-bottom: 12px;
+    -webkit-appearance: none;
+  }
+  .comment-input:focus, .date-input:focus { border-color: var(--accent); }
+  .date-input { color-scheme: dark; }
+
+  .save-btn {
+    width: 100%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: 700;
+    padding: 13px;
+    cursor: pointer;
+    transition: opacity .15s;
+  }
+  .save-btn:active { opacity: .8; }
+  .save-btn:disabled { opacity: .4; cursor: default; }
+
+  /* ── История ── */
+  .history-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .history-head h2 { font-size: 14px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: .06em; }
+  .export-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 13px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .export-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .day-group { margin-bottom: 14px; }
+  .day-title {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+    font-variant-numeric: tabular-nums;
+  }
+  .entry {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  .entry .info { flex: 1; min-width: 0; }
+  .entry .cat { font-size: 14px; font-weight: 600; }
+  .entry .note { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .entry .sum { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .entry .del {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 17px;
+    cursor: pointer;
+    padding: 4px 6px;
+    line-height: 1;
+    border-radius: 6px;
+  }
+  .entry .del:hover { color: var(--danger); background: rgba(229,99,108,.1); }
+
+  .empty {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 14px;
+    padding: 30px 10px;
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--accent);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 11px 20px;
+    border-radius: 10px;
+    transition: transform .3s ease;
+    z-index: 10;
+    box-shadow: 0 6px 20px rgba(0,0,0,.4);
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+
+  .month-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .month-nav .label { margin-bottom: 0; }
+  .month-nav button {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 8px;
+    width: 30px;
+    height: 30px;
+    font-size: 15px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .month-nav button:hover { color: var(--accent); border-color: var(--accent); }
+  .month-nav button:disabled { opacity: .3; cursor: default; }
+  .month-count {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+  .cat-bar-head .p { color: var(--accent); font-weight: 600; margin-right: 8px; }
+
+  .storage-warn {
+    background: rgba(229,99,108,.12);
+    border: 1px solid var(--danger);
+    color: var(--danger);
+    font-size: 13px;
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 14px;
+    display: none;
+  }
+</style>
+</head>
+<body class="wallet-work">
+
+<div class="wallet-tabs">
+  <button class="wallet-tab active" id="tabWork" onclick="switchWallet('work')">💼 Рабочие</button>
+  <button class="wallet-tab" id="tabPersonal" onclick="switchWallet('personal')">🏠 Личные</button>
+</div>
+
+<div class="storage-warn" id="storageWarn">
+  ⚠️ Браузер не разрешил сохранение данных — записи пропадут после закрытия страницы. Открой файл в обычном браузере (Chrome, Edge).
+</div>
+
+<div class="month-card">
+  <div class="month-nav">
+    <button onclick="shiftMonth(-1)" title="Предыдущий месяц">‹</button>
+    <div class="label" id="monthLabel">Расходы за месяц</div>
+    <button id="nextMonthBtn" onclick="shiftMonth(1)" title="Следующий месяц">›</button>
+  </div>
+  <div class="total" id="monthTotal">0 ₸</div>
+  <div class="month-count" id="monthCount"></div>
+  <div class="cat-bars" id="catBars"></div>
+</div>
+
+<div class="add-card">
+  <h2>Новый расход</h2>
+  <div class="amount-row">
+    <input type="number" inputmode="decimal" class="amount-input" id="amount" placeholder="0" min="0" step="any">
+    <span class="currency">₸</span>
+  </div>
+  <div class="chips" id="chips"></div>
+  <input type="text" class="comment-input" id="comment" placeholder="Комментарий (необязательно)">
+  <input type="date" class="date-input" id="date">
+  <button class="save-btn" id="saveBtn" onclick="addExpense()">Добавить расход</button>
+</div>
+
+<div class="history-head">
+  <h2>История</h2>
+  <button class="export-btn" onclick="exportCSV()">⬇ Экспорт CSV</button>
+</div>
+<div id="history"></div>
+
+<div class="toast" id="toast">Расход добавлен ✓</div>
+
+<script>
+// ───────────────── Хранилище ─────────────────
+const STORE_KEY = 'expense_tracker_v1';
+let memoryFallback = null;
+
+function loadData() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    document.getElementById('storageWarn').style.display = 'block';
+    if (memoryFallback) return memoryFallback;
+  }
+  return defaultData();
+}
+function saveData() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(data));
+  } catch (e) {
+    memoryFallback = data;
+    document.getElementById('storageWarn').style.display = 'block';
+  }
+}
+function defaultData() {
+  return {
+    work: {
+      categories: ['Транспорт / ГСМ', 'Командировки', 'Питание в поездке', 'Связь', 'Канцелярия', 'Представительские', 'Прочее'],
+      entries: []
+    },
+    personal: {
+      categories: ['Продукты', 'Кафе и рестораны', 'Транспорт', 'Дом и быт', 'Здоровье', 'Одежда', 'Развлечения', 'Подарки', 'Прочее'],
+      entries: []
+    }
+  };
+}
+
+// ───────────────── Состояние ─────────────────
+let data = loadData();
+let currentWallet = 'work';
+let selectedCategory = null;
+let viewYear = new Date().getFullYear();
+let viewMonth = new Date().getMonth(); // 0-11
+
+function shiftMonth(delta) {
+  viewMonth += delta;
+  if (viewMonth < 0) { viewMonth = 11; viewYear--; }
+  if (viewMonth > 11) { viewMonth = 0; viewYear++; }
+  renderSummary();
+}
+function isCurrentMonth() {
+  const now = new Date();
+  return viewYear === now.getFullYear() && viewMonth === now.getMonth();
+}
+
+const fmt = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
+const MONTHS = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
+
+// ───────────────── Кошельки ─────────────────
+function switchWallet(w) {
+  currentWallet = w;
+  selectedCategory = null;
+  document.body.className = w === 'work' ? 'wallet-work' : 'wallet-personal';
+  document.getElementById('tabWork').classList.toggle('active', w === 'work');
+  document.getElementById('tabPersonal').classList.toggle('active', w === 'personal');
+  renderAll();
+}
+
+// ───────────────── Статьи ─────────────────
+function renderChips() {
+  const box = document.getElementById('chips');
+  box.innerHTML = '';
+  data[currentWallet].categories.forEach(cat => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (cat === selectedCategory ? ' selected' : '');
+    b.textContent = cat;
+    b.onclick = () => { selectedCategory = cat; renderChips(); };
+    box.appendChild(b);
+  });
+  const add = document.createElement('button');
+  add.className = 'chip add-chip';
+  add.textContent = '+ статья';
+  add.onclick = addCategory;
+  box.appendChild(add);
+}
+function addCategory() {
+  const name = prompt('Название новой статьи расходов:');
+  if (!name || !name.trim()) return;
+  const clean = name.trim();
+  if (data[currentWallet].categories.includes(clean)) { alert('Такая статья уже есть'); return; }
+  data[currentWallet].categories.push(clean);
+  selectedCategory = clean;
+  saveData();
+  renderChips();
+}
+
+// ───────────────── Добавление расхода ─────────────────
+function addExpense() {
+  const amountEl = document.getElementById('amount');
+  const amount = parseFloat(amountEl.value);
+  if (!amount || amount <= 0) { amountEl.focus(); shake(amountEl); return; }
+  if (!selectedCategory) { alert('Выбери статью расходов'); return; }
+  const date = document.getElementById('date').value || todayISO();
+  const comment = document.getElementById('comment').value.trim();
+
+  data[currentWallet].entries.push({
+    id: Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+    date, amount, category: selectedCategory, comment
+  });
+  saveData();
+
+  amountEl.value = '';
+  document.getElementById('comment').value = '';
+  renderAll();
+  showToast();
+  amountEl.focus();
+}
+function shake(el) {
+  el.style.borderColor = 'var(--danger)';
+  setTimeout(() => el.style.borderColor = '', 800);
+}
+function deleteEntry(id) {
+  if (!confirm('Удалить эту запись?')) return;
+  data[currentWallet].entries = data[currentWallet].entries.filter(e => e.id !== id);
+  saveData();
+  renderAll();
+}
+
+// ───────────────── Отрисовка ─────────────────
+function renderAll() {
+  renderChips();
+  renderSummary();
+  renderHistory();
+}
+
+function renderSummary() {
+  const ym = viewYear + '-' + String(viewMonth + 1).padStart(2, '0');
+  const monthEntries = data[currentWallet].entries.filter(e => e.date.startsWith(ym));
+  const total = monthEntries.reduce((s, e) => s + e.amount, 0);
+
+  document.getElementById('monthLabel').textContent =
+    MONTHS[viewMonth].charAt(0).toUpperCase() + MONTHS[viewMonth].slice(1) + ' ' + viewYear;
+  document.getElementById('monthTotal').textContent = fmt.format(total) + ' ₸';
+  document.getElementById('monthCount').textContent =
+    monthEntries.length ? 'Записей: ' + monthEntries.length : 'Записей за этот месяц нет';
+  document.getElementById('nextMonthBtn').disabled = isCurrentMonth();
+
+  const byCat = {};
+  monthEntries.forEach(e => byCat[e.category] = (byCat[e.category] || 0) + e.amount);
+  const sorted = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+
+  const box = document.getElementById('catBars');
+  box.innerHTML = '';
+  sorted.forEach(([cat, sum]) => {
+    const pct = total ? Math.round(sum / total * 100) : 0;
+    const row = document.createElement('div');
+    row.className = 'cat-bar-row';
+    row.innerHTML =
+      '<div class="cat-bar-head"><span class="n">' + esc(cat) + '</span>' +
+      '<span><span class="p">' + pct + '%</span>' +
+      '<span class="v">' + fmt.format(sum) + ' ₸</span></span></div>' +
+      '<div class="cat-bar-track"><div class="cat-bar-fill" style="width:' + pct + '%"></div></div>';
+    box.appendChild(row);
+  });
+}
+
+function renderHistory() {
+  const box = document.getElementById('history');
+  box.innerHTML = '';
+  const entries = [...data[currentWallet].entries].sort((a, b) =>
+    b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+
+  if (!entries.length) {
+    box.innerHTML = '<div class="empty">Пока нет записей.<br>Добавь первый расход выше 👆</div>';
+    return;
+  }
+
+  const byDay = {};
+  entries.forEach(e => (byDay[e.date] = byDay[e.date] || []).push(e));
+
+  Object.keys(byDay).sort((a, b) => b.localeCompare(a)).forEach(day => {
+    const group = document.createElement('div');
+    group.className = 'day-group';
+    const daySum = byDay[day].reduce((s, e) => s + e.amount, 0);
+    const title = document.createElement('div');
+    title.className = 'day-title';
+    title.innerHTML = '<span>' + formatDay(day) + '</span><span>' + fmt.format(daySum) + ' ₸</span>';
+    group.appendChild(title);
+
+    byDay[day].forEach(e => {
+      const row = document.createElement('div');
+      row.className = 'entry';
+      row.innerHTML =
+        '<div class="info"><div class="cat">' + esc(e.category) + '</div>' +
+        (e.comment ? '<div class="note">' + esc(e.comment) + '</div>' : '') + '</div>' +
+        '<div class="sum">' + fmt.format(e.amount) + ' ₸</div>';
+      const del = document.createElement('button');
+      del.className = 'del';
+      del.textContent = '✕';
+      del.title = 'Удалить';
+      del.onclick = () => deleteEntry(e.id);
+      row.appendChild(del);
+      group.appendChild(row);
+    });
+    box.appendChild(group);
+  });
+}
+
+// ───────────────── Экспорт CSV ─────────────────
+function exportCSV() {
+  const entries = [...data[currentWallet].entries].sort((a, b) => a.date.localeCompare(b.date));
+  if (!entries.length) { alert('Нет данных для экспорта'); return; }
+  let csv = '\uFEFFДата;Статья;Сумма;Комментарий\n';
+  entries.forEach(e => {
+    csv += [e.date, csvSafe(e.category), String(e.amount).replace('.', ','), csvSafe(e.comment || '')].join(';') + '\n';
+  });
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'расходы_' + (currentWallet === 'work' ? 'рабочие' : 'личные') + '_' + todayISO() + '.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function csvSafe(s) { return '"' + s.replace(/"/g, '""') + '"'; }
+
+// ───────────────── Утилиты ─────────────────
+function todayISO() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function formatDay(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  const today = todayISO();
+  if (iso === today) return 'Сегодня';
+  const yest = new Date(); yest.setDate(yest.getDate() - 1);
+  const yestISO = yest.getFullYear() + '-' + String(yest.getMonth() + 1).padStart(2, '0') + '-' + String(yest.getDate()).padStart(2, '0');
+  if (iso === yestISO) return 'Вчера';
+  return dt.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', weekday: 'short' });
+}
+function esc(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function showToast() {
+  const t = document.getElementById('toast');
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1600);
+}
+
+// ───────────────── Старт ─────────────────
+document.getElementById('date').value = todayISO();
+document.getElementById('amount').addEventListener('keydown', e => {
+  if (e.key === 'Enter') addExpense();
+});
+renderAll();
+</script>
+</body>
+</html>

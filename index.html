@@ -317,6 +317,7 @@ let currentDayId=null;
 let currentVisitId=null;
 let visitScores={};
 let flaggedItems=[];
+let disabledItems=new Set(); // criteria marked N/A for this visit
 let filterMgr="all", sumFilterMgr="all", anaMetric="total";
 
 /* ===================== Supabase connection ===================== */
@@ -523,6 +524,7 @@ function itemKey(item){return btoa(unescape(encodeURIComponent(item))).replace(/
 function fd(d){if(!d)return"";const[y,m,day]=d.split("-");return day+"."+m+"."+y;}
 function esc(s){const d=document.createElement("div");d.textContent=s;return d.innerHTML;}
 function ringColor(v){return v<=1?"#A8402F":v<=2?"#B5731E":v<=3?"#8A7714":v>=4.5?"#1F7A5C":"#4B7A2B";}
+function visitAvg(v){const max=v.maxTotal||VISIT_MAX;return max>0?v.total/max*5:0;}
 function fc(s){return"fill-"+Math.min(5,Math.max(1,Math.round(s)));}
 function scol(v){return v<=1?"#A8402F":v<=2?"#B5731E":v<=3?"#8A7714":v>=4.5?"#1F7A5C":"#4B7A2B";}
 function sbg(v){return v<=1?"var(--r1-bg)":v<=2?"var(--r2-bg)":v<=3?"var(--r3-bg)":v>=4.5?"var(--r5-bg)":"var(--r4-bg)";}
@@ -619,7 +621,7 @@ function closeDay(){
 
 function renderActiveDay(day){
   const visitCount=day.visits.length;
-  const avgAll=visitCount?(day.visits.reduce((a,v)=>a+v.total,0)/visitCount/VISIT_MAX*5):0;
+  const avgAll=visitCount?(day.visits.reduce((a,v)=>a+visitAvg(v),0)/visitCount):0;
   return '<div class="day-header">'+
       '<div class="day-header-info">'+
         '<div class="day-header-title"><i class="ti ti-calendar-event"></i> Чек-лист дня — '+fd(day.date)+'</div>'+
@@ -693,7 +695,7 @@ function setTheoryScore(dayId,idx,val){
 function renderClientTabs(day){
   const wrap=document.getElementById("client-tabs");
   wrap.innerHTML=day.visits.map(v=>{
-    const avg=v.total/VISIT_MAX*5;
+    const avg=visitAvg(v);
     return '<div class="client-tab'+(v.id===currentVisitId?" active":"")+'" onclick="openVisit('+v.id+')">'+
       scoreRing(avg,5,22,2.5,avg.toFixed(1))+'<span>'+esc(v.client)+'</span>'+
       '<i class="ti ti-x" style="font-size:13px;margin-left:2px;opacity:.6" onclick="event.stopPropagation();deleteVisitFromDay('+day.id+','+v.id+')"></i>'+
@@ -725,6 +727,7 @@ function startVisitForClient(clientName){
   }
   visitScores={}; VISIT_ITEMS.forEach(i=>visitScores[i]=0);
   flaggedItems=[];
+  disabledItems=new Set();
   const visit={id:Date.now(),client:clientName,note:"",scores:{...visitScores},total:0,date:day.date};
   day.visits.push(visit);
   currentVisitId=visit.id;
@@ -788,7 +791,7 @@ function renderVisitForm(day){
   // recommendation box (last visit weak zones)
   let recoHtml="";
   if(lastVisit){
-    const avg=(lastVisit.total/VISIT_MAX*5).toFixed(1);
+    const avg=(visitAvg(lastVisit)).toFixed(1);
     if(flaggedItems.length){
       recoHtml+='<div class="reco-box"><i class="ti ti-bulb"></i><div><div class="reco-title">Рекомендации на этот визит — «'+esc(visit.client)+'»</div>'+
         '<div class="reco-text"><p>В прошлый визит ('+fd(lastVisit.date)+', ср. балл '+avg+') слабыми оказались следующие зоны:</p>'+
@@ -829,38 +832,71 @@ function buildVisitCriteriaGrid(){
     stitle.innerHTML=esc(group.section)+(group.note?'<span class="criteria-section-note">'+esc(group.note)+'</span>':"");
     sec.appendChild(stitle);
     group.items.forEach(item=>{
-      const row=document.createElement("div");row.className="criteria-item"+(flaggedItems.includes(item)?" flagged":"");
+      const isDisabled=disabledItems.has(item);
+      const row=document.createElement("div");
+      row.className="criteria-item"+(flaggedItems.includes(item)&&!isDisabled?" flagged":"");
+      row.id="crow-"+itemKey(item);
+      if(isDisabled){ row.style.opacity="0.38"; row.style.background="var(--line-soft)"; }
       const lbl=document.createElement("div");lbl.className="criteria-item-label";
-      if(flaggedItems.includes(item)){ const dot=document.createElement("span");dot.className="flag-dot";dot.title="Слабая зона в прошлый визит";lbl.appendChild(dot); }
+      if(flaggedItems.includes(item)&&!isDisabled){ const dot=document.createElement("span");dot.className="flag-dot";dot.title="Слабая зона в прошлый визит";lbl.appendChild(dot); }
       const txt=document.createElement("span");txt.textContent=item;lbl.appendChild(txt);
       const sr=document.createElement("div");sr.className="star-row";
-      for(let v=1;v<=5;v++){
-        const s=document.createElement("span");s.className="star";s.textContent="★";s.dataset.item=item;s.dataset.val=v;
-        s.onclick=()=>setVisitScore(item,v); sr.appendChild(s);
+      if(!isDisabled){
+        for(let v=1;v<=5;v++){
+          const s=document.createElement("span");s.className="star";s.textContent="★";s.dataset.item=item;s.dataset.val=v;
+          s.onclick=()=>setVisitScore(item,v); sr.appendChild(s);
+        }
       }
-      const num=document.createElement("div");num.className="score-num";num.id="vsnum-"+itemKey(item);num.textContent=visitScores[item]||0;
-      row.appendChild(lbl);row.appendChild(sr);row.appendChild(num);
+      const num=document.createElement("div");num.className="score-num";num.id="vsnum-"+itemKey(item);
+      num.textContent=isDisabled?"—":visitScores[item]||0;
+      // N/A toggle button
+      const naBtn=document.createElement("button");
+      naBtn.textContent=isDisabled?"Вкл":"Н/А";
+      naBtn.title=isDisabled?"Включить критерий":"Пометить как неприменимый для этой ТТ";
+      naBtn.style.cssText="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;padding:3px 8px;border-radius:6px;border:1.5px solid "+(isDisabled?"var(--indigo)":"var(--line)")+";background:transparent;color:"+(isDisabled?"var(--indigo)":"var(--ink-soft)")+";cursor:pointer;flex-shrink:0;margin-left:6px;";
+      naBtn.onclick=()=>toggleDisabledItem(item);
+      row.appendChild(lbl);row.appendChild(sr);row.appendChild(num);row.appendChild(naBtn);
       sec.appendChild(row);
     });
     card.appendChild(sec);
   });
   VISIT_ITEMS.forEach(item=>{
-    document.querySelectorAll('.star[data-item="'+CSS.escape(item)+'"]').forEach(s=>s.classList.toggle("active",parseInt(s.dataset.val)<=(visitScores[item]||0)));
+    if(!disabledItems.has(item)){
+      document.querySelectorAll('.star[data-item="'+CSS.escape(item)+'"]').forEach(s=>s.classList.toggle("active",parseInt(s.dataset.val)<=(visitScores[item]||0)));
+    }
   });
+  updateVisitTotal();
+}
+function toggleDisabledItem(item){
+  if(disabledItems.has(item)){ disabledItems.delete(item); } else { disabledItems.add(item); visitScores[item]=0; }
+  buildVisitCriteriaGrid();
+}
+function updateVisitTotal(){
+  const activeItems=VISIT_ITEMS.filter(i=>!disabledItems.has(i));
+  const total=activeItems.reduce((a,i)=>a+(visitScores[i]||0),0);
+  const max=activeItems.length*5;
+  const totalEl=document.getElementById("visit-total-score");
+  const maxEl=document.querySelector(".total-bar .total-max");
+  if(totalEl)totalEl.textContent=total;
+  if(maxEl)maxEl.textContent="/ "+max;
+  return {total,max,activeItems};
 }
 function setVisitScore(item,val){
+  if(disabledItems.has(item))return;
   visitScores[item]=val;
   document.querySelectorAll('.star[data-item="'+CSS.escape(item)+'"]').forEach(s=>s.classList.toggle("active",parseInt(s.dataset.val)<=val));
   const el=document.getElementById("vsnum-"+itemKey(item)); if(el)el.textContent=val;
-  const total=Object.values(visitScores).reduce((a,b)=>a+b,0);
-  const totalEl=document.getElementById("visit-total-score"); if(totalEl)totalEl.textContent=total;
+  updateVisitTotal();
 }
 
 function saveCurrentVisit(){
   const day=getCurrentDay(); if(!day)return;
   const visit=day.visits.find(v=>v.id===currentVisitId); if(!visit)return;
+  const {total,max,activeItems}=updateVisitTotal();
   visit.scores={...visitScores};
-  visit.total=Object.values(visitScores).reduce((a,b)=>a+b,0);
+  visit.total=total;
+  visit.maxTotal=max;
+  visit.disabledItems=[...disabledItems];
   saveVisitOnly(day.id,visit);
   showPostSaveSummary(visit);
   renderClientTabs(day);
@@ -884,15 +920,18 @@ function buildNarrativeAdvice(item){
 }
 
 function showPostSaveSummary(v){
-  const avg=(v.total/VISIT_MAX*5).toFixed(1);
-  const weak=VISIT_ITEMS.filter(i=>(v.scores[i]||0)<=2);
-  const strongOk=VISIT_ITEMS.filter(i=>(v.scores[i]||0)>=4);
+  const avg=(visitAvg(v)).toFixed(1);
+  const disabled=new Set(v.disabledItems||[]);
+  const activeItems=VISIT_ITEMS.filter(i=>!disabled.has(i));
+  const weak=activeItems.filter(i=>(v.scores[i]||0)<=2);
+  const strongOk=activeItems.filter(i=>(v.scores[i]||0)>=4);
+  const maxLabel=v.maxTotal||VISIT_MAX;
   const area=document.getElementById("visit-reco-area");
   let html='<div class="card" style="border-color:var(--indigo);border-width:1.5px">'+
     '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:'+(weak.length?'13px':'2px')+'">'+
       '<div style="display:flex;align-items:center;gap:11px">'+scoreRing(parseFloat(avg),5,42,4,avg)+
       '<div><div style="font-family:\'Archivo\',sans-serif;font-weight:700;font-size:14.5px">Визит сохранён — '+esc(v.client)+'</div>'+
-      '<div style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;color:var(--ink-soft);margin-top:2px">итог '+v.total+'/'+VISIT_MAX+'</div></div></div>'+
+      '<div style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;color:var(--ink-soft);margin-top:2px">итог '+v.total+'/'+maxLabel+(disabled.size?' · '+disabled.size+' критери'+(disabled.size===1?'й':'я')+' Н/А':'')+' </div></div></div>'+
     '</div>';
   if(weak.length){
     html+='<div class="reco-text" style="background:var(--r1-bg);border-radius:8px;padding:11px 13px;color:#7A2C1F"><p style="margin-bottom:8px"><b><i class="ti ti-target-arrow"></i> Над чем поработать к следующему визиту:</b></p>'+
@@ -994,7 +1033,7 @@ function renderHistory(){
   list.innerHTML="";
   const showBranch=(currentBranch==="__ALL__");
   flat.forEach(v=>{
-    const avg=(v.total/VISIT_MAX*5).toFixed(1);
+    const avg=(visitAvg(v)).toFixed(1);
     const weak=VISIT_ITEMS.filter(i=>(v.scores[i]||0)<=2);
     const d=document.createElement("div");d.className="card";d.style.marginBottom="10px";
     d.innerHTML=
@@ -1055,7 +1094,7 @@ function renderSummary(){
   const cont=document.getElementById("summary-content");
   if(!filtered.length){cont.innerHTML='<div class="empty"><i class="ti ti-clipboard-data"></i>Нет данных для анализа</div>';return;}
   const n=filtered.length;
-  const avgT=(filtered.reduce((a,v)=>a+v.total,0)/n/VISIT_MAX*5).toFixed(1);
+  const avgT=(filtered.reduce((a,v)=>a+visitAvg(v),0)/n).toFixed(1);
   const maxS=Math.max(...filtered.map(v=>v.total));const minS=Math.min(...filtered.map(v=>v.total));
   const ia={};VISIT_ITEMS.forEach(item=>{const vals=filtered.map(v=>v.scores[item]||0);ia[item]=vals.reduce((a,b)=>a+b,0)/vals.length;});
   const sorted=Object.entries(ia).sort((a,b)=>a[1]-b[1]);
@@ -1108,7 +1147,7 @@ function renderTrendChart(){
   if(data.length<2){el.innerHTML='<div class="empty" style="padding:1.5rem"><i class="ti ti-chart-line"></i>Нужно минимум 2 визита для графика</div>';return;}
   const w=820,h=220,padL=30,padR=14,padT=16,padB=28;
   const innerW=w-padL-padR, innerH=h-padT-padB;
-  const avgs=data.map(v=>v.total/VISIT_MAX*5);
+  const avgs=data.map(v=>visitAvg(v));
   const n=avgs.length;
   const xStep=n>1?innerW/(n-1):0;
   const yFor=v=>padT+innerH-(v/5*innerH);
@@ -1141,7 +1180,7 @@ function renderMgrCompare(){
   const flat=getAllVisitsFlat();
   const stats=mgrs.map(m=>{
     const mv=flat.filter(v=>v.mgr===m);
-    const avg=mv.length?mv.reduce((a,v)=>a+v.total,0)/mv.length/VISIT_MAX*5:0;
+    const avg=mv.length?mv.reduce((a,v)=>a+visitAvg(v),0)/mv.length:0;
     return {mgr:m,count:mv.length,avg};
   }).sort((a,b)=>b.avg-a.avg);
   el.innerHTML=stats.map((s,i)=>{
@@ -1160,9 +1199,9 @@ function renderClientAnalytics(){
   const el=document.getElementById("client-analytics");
   const entries=Object.entries(clientMap).map(([name,vs])=>{
     const sorted=[...vs].sort((a,b)=>a.date.localeCompare(b.date));
-    const avg=vs.reduce((a,v)=>a+v.total,0)/vs.length/VISIT_MAX*5;
+    const avg=vs.reduce((a,v)=>a+visitAvg(v),0)/vs.length;
     const first=sorted[0],last=sorted[sorted.length-1];
-    const firstAvg=first.total/VISIT_MAX*5, lastAvg=last.total/VISIT_MAX*5;
+    const firstAvg=visitAvg(first), lastAvg=visitAvg(last);
     const trend=vs.length>1?lastAvg-firstAvg:0;
     return {name,count:vs.length,avg,trend,lastDate:last.date,mgrs:[...new Set(vs.map(v=>v.mgr))],district:last.district||""};
   }).sort((a,b)=>a.avg-b.avg);

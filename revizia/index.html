@@ -238,6 +238,7 @@ h1{font-family:var(--f-display);font-weight:600;font-size:22px;letter-spacing:.0
     <label><input type="checkbox" id="speakAll"> Озвучивать каждую запись</label>
     <label><input type="checkbox" id="speakBad" checked> Голосом сообщать о расхождении</label>
     <label><input type="checkbox" id="useAI" checked> ИИ-разбор непонятных фраз</label>
+    <button class="btn" type="button" id="testVoiceBtn" style="padding:4px 10px;font-size:13px">Проверить голос</button>
     <span id="aiState" class="hint"></span>
   </div>
   <section class="vlog" id="vlog" hidden aria-live="polite"></section>
@@ -475,9 +476,14 @@ function updateRow(it){
   else if (s.st === 'ok') d.innerHTML = '<span class="pill ok">✓ сходится</span>';
   else d.innerHTML = `<span class="pill ${s.st}">${s.d > 0 ? '+' : '−'}${fmtQ(Math.abs(s.d))}</span>` + (it.price ? `<span class="sum">${s.d > 0 ? '+' : '−'}${money(Math.abs(s.d * it.price))}</span>` : '');
 }
+let listRaf = 0;
+function scheduleList(){ if (listRaf) return; listRaf = requestAnimationFrame(() => { listRaf = 0; renderList(); }); }
 function renderList(){
   if (filter === 'unk') { renderUnknowns(); return; }
-  const rows = items.filter(matches); if (query) rows.sort((a, b) => rank(a) - rank(b));
+  // newest counted first, then the rest in stock-file order; when searching, best match first
+  const tOf = it => { const c = counts.get(it.key); return c && c.q != null ? (c.t || 0) : 0; };
+  const rows = items.filter(matches);
+  if (query) rows.sort((a, b) => rank(a) - rank(b) || tOf(b) - tOf(a)); else rows.sort((a, b) => tOf(b) - tOf(a));
   const frag = document.createDocumentFragment();
   const hdr = document.createElement('div'); hdr.className = 'row hdr';
   hdr.innerHTML = '<div>Артикул</div><div>Наименование</div><div class="r">Учёт</div><div class="r">Факт</div><div class="r">Разница</div>';
@@ -646,7 +652,7 @@ function applyCmd(it, mode, n, text, source){
   lastItem = it; lastAt = Date.now();
   store.logEvent({audit_id: audit.id, art: it.art, mode, n, prev, q, text, source, by_name: me.name});
   addLog({kind: 'ok', it, prev, q, mode, n, text, source}); lastEvent = {type: 'ok', e: voiceLog[0]};
-  query = it.art; $('#q').value = it.art; renderList();
+  scheduleList();
   signal(it, q, mode, n);
 }
 function signal(it, q, mode, n){
@@ -756,7 +762,7 @@ async function handleOne(text, alts){
   }
   const choices = local.find(c => c.amb)?.amb || candidatesFor(text).slice(0, 4);
   const q1 = local.find(c => c.qty != null);
-  if (local.some(c => c.it && c.qty == null)) { addLog({kind: 'err', msg: 'Не услышал количество — повторите с числом', text, choices, qty: null, mode: 'set'}); speak('Не услышал количество, повторите'); return; }
+  if (local.some(c => c.it && c.qty == null)) { addLog({kind: 'err', msg: 'Не услышал количество — повторите с числом', text, choices: [], qty: null, mode: 'set'}); speak('Не услышал количество, повторите'); return; }
   recordUnknown(text, guessArt(local), q1 ? q1.qty : guessQty(local), q1 ? q1.mode : (local[0] && local[0].mode) || 'set', 'не распознан', choices);
 }
 
@@ -840,7 +846,7 @@ async function recordUnknown(text, art, qty, mode, reason, choices){
   const box = $('#alert'); box.className = 'alert bad show';
   box.innerHTML = `<span>${notInStock ? 'Нет в остатках: <span class="art">' + esc(art) + '</span>' : 'Не распознан артикул'}${row.qty != null ? ' · ' + fmtQ(row.qty) + ' шт.' : ''} — записано в «Нераспознанные»</span>`;
   clearTimeout(signal.t); signal.t = setTimeout(() => box.classList.remove('show'), 10000);
-  const logE = {kind: 'err', msg: (notInStock ? 'Нет в остатках — записано в «Нераспознанные»' : 'Не распознан — записано в «Нераспознанные»') + (choices && choices.length ? '. Если это одна из позиций, выберите:' : ''), text, choices: choices || [], qty: row.qty, mode: row.mode}; addLog(logE); lastEvent = {type: 'unk', log: logE, row};
+  const logE = {kind: 'err', msg: (notInStock ? 'Нет в остатках — записано в «Нераспознанные»' : 'Не распознан — записано в «Нераспознанные»') , text, choices: [], qty: row.qty, mode: row.mode}; addLog(logE); lastEvent = {type: 'unk', log: logE, row};
   try { const saved = await store.addUnknown(row); logE.unkId = saved.id; if (!unknowns.some(u => u.id === saved.id)) unknowns.push(saved); }
   catch(e) { unknowns.push(Object.assign({id: 'tmp' + Date.now(), at: new Date().toISOString(), resolved: false}, row)); toast('Нераспознанное не сохранилось в базе: ' + (e.message || e)); }
   renderStats(); if (filter === 'unk') renderList();
@@ -915,7 +921,6 @@ function makeRec(){
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
       const r = ev.results[i];
       if (r.isFinal) {
-        if (speaking) continue;
         const alts = []; for (let k = 1; k < r.length; k++) alts.push(r[k].transcript);
         $('#heard').textContent = r[0].transcript;
         handleText(r[0].transcript, alts);
@@ -933,6 +938,7 @@ async function startListening(){
   if (!SR) { toast('Этот браузер не умеет распознавать речь. Откройте страницу в Google Chrome.'); return; }
   if (!audit || !items.length) { toast('Сначала загрузите остатки и начните ревизию'); $('#panel').open = true; return; }
   try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch(e) {}
+  unlockTTS('Слушаю');
   listening = true; if (!rec) makeRec();
   micUI('on', 'Включаю микрофон…'); startRec();
   try { wake = await navigator.wakeLock.request('screen'); } catch(e) {}
@@ -947,16 +953,47 @@ $('#micBtn').addEventListener('click', () => listening ? stopListening() : start
 document.addEventListener('visibilitychange', async () => { if (document.visibilityState === 'visible' && listening) { try { wake = await navigator.wakeLock.request('screen'); } catch(e) {} startRec(); } });
 
 /* speaking pauses the microphone so the phone does not hear itself */
+let ruVoice = null, ttsUnlocked = false;
+function pickVoice(){
+  try { const vs = speechSynthesis.getVoices(); ruVoice = vs.find(v => /^ru/i.test(v.lang) && /google/i.test(v.name)) || vs.find(v => /^ru/i.test(v.lang)) || null; } catch(e) {}
+}
+if (window.speechSynthesis) { pickVoice(); try { speechSynthesis.addEventListener('voiceschanged', pickVoice); } catch(e) { speechSynthesis.onvoiceschanged = pickVoice; } }
+// Chrome on phones only lets a page speak after a tap: say something short from the tap itself
+function unlockTTS(text){
+  if (!window.speechSynthesis) return;
+  try { const u = new SpeechSynthesisUtterance(text || ' '); u.lang = 'ru-RU'; if (ruVoice) u.voice = ruVoice; u.volume = text ? 1 : 0; speechSynthesis.speak(u); ttsUnlocked = true; } catch(e) {}
+}
+let speakQ = Promise.resolve();
 function speak(t){
   if (!window.speechSynthesis) return;
-  try {
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(t); u.lang = 'ru-RU'; u.rate = 1.15;
-    speaking = true; if (listening) { micUI('pause', 'Говорю…'); try { rec.abort(); } catch(e) {} }
-    const resume = () => { if (!speaking) return; speaking = false; if (listening) { micUI('on', 'Слушаю…'); setTimeout(startRec, 250); } };
-    u.onend = resume; u.onerror = resume; setTimeout(resume, 9000);
-    speechSynthesis.speak(u);
-  } catch(e) { speaking = false; }
+  speakQ = speakQ.then(() => new Promise(done => {
+    let finished = false;
+    speaking = true;
+    if (listening) { micUI('pause', 'Говорю…'); try { rec.abort(); } catch(e) {} }
+    const resume = () => {
+      if (finished) return; finished = true; speaking = false;
+      if (listening) { micUI('on', 'Слушаю…'); setTimeout(startRec, 300); }
+      done();
+    };
+    try { if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel(); } catch(e) {}
+    // give the microphone a moment to release the audio before talking (Android)
+    setTimeout(() => {
+      try {
+        const u = new SpeechSynthesisUtterance(t); u.lang = 'ru-RU'; u.rate = 1.1; u.volume = 1;
+        if (!ruVoice) pickVoice(); if (ruVoice) u.voice = ruVoice;
+        u.onend = resume; u.onerror = resume;
+        speechSynthesis.resume(); speechSynthesis.speak(u);
+        setTimeout(resume, Math.min(12000, 2500 + t.length * 90));
+      } catch(e) { resume(); }
+    }, listening ? 350 : 60);
+  }));
+}
+function testVoice(){
+  unlockTTS('Проверка голоса. Если вы это слышите, озвучка работает.');
+  setTimeout(() => {
+    if (!window.speechSynthesis) { toast('Этот браузер не умеет говорить'); return; }
+    if (!ruVoice) toast('На телефоне не найден русский голос. Настройки → Система → Язык и ввод → Синтез речи → Google, скачайте русский язык.');
+  }, 1200);
 }
 
 /* ---------- audit loading and sync ---------- */
@@ -987,7 +1024,7 @@ function onRemoteCount(p){
   const had = byKey.has(p.eventType === 'DELETE' ? p.old.art : p.new.art);
   syncExtras();
   const it = byKey.get(p.eventType === 'DELETE' ? p.old.art : p.new.art);
-  if (it && had) { updateRow(it); renderStats(); } else renderAll();
+  if (it && had) { updateRow(it); renderStats(); scheduleList(); } else renderAll();
 }
 let auditT;
 function onRemoteAudit(){
@@ -1185,6 +1222,7 @@ $('#list').addEventListener('focusout', e => {
   if (it && e.target.value.trim() !== '') commitTyped(it, e.target.value);
   if (it) updateRow(it);
 });
+$('#testVoiceBtn').addEventListener('click', testVoice);
 ['speakAll', 'speakBad', 'useAI'].forEach(id => { const el = $('#' + id); el.checked = lsGet('rv-' + id, el.checked); el.addEventListener('change', () => lsSet('rv-' + id, el.checked)); });
 
 /* ---------- start ---------- */

@@ -187,6 +187,12 @@ h1{font-family:var(--f-display);font-weight:600;font-size:22px;letter-spacing:.0
 .login input{padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);font-size:16px}
 .login .err{color:var(--short);font-size:13px}
 .demo-banner{background:var(--over-soft);color:var(--ink);font-size:13px;padding:8px 12px;border-radius:8px}
+.hist{display:grid;gap:6px}
+.row.unk .uart{width:110px;text-align:left;font-size:14px}
+.row.unk.done{opacity:.55}
+@media (max-width:720px){.row.unk .diff{grid-area:diff}.row.unk .fact{grid-area:fact}}
+.hist .h{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid var(--line);border-radius:8px}
+.hist .h small{display:block;color:var(--muted)}
 .empty-audit{padding:24px 14px;display:grid;gap:10px;justify-items:start}
 </style>
 
@@ -219,7 +225,7 @@ h1{font-family:var(--f-display);font-weight:600;font-size:22px;letter-spacing:.0
       <button class="bigmic" id="micBtn" type="button" aria-label="Включить микрофон"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg></button>
       <div class="caption">
         <span class="st" id="micState">Нажмите микрофон, чтобы начать</span>
-        <span class="heard" id="heard">Говорите: «61 21 652 — три штуки», «нашли ещё пять», «отмена»</span>
+        <span class="heard" id="heard">Говорите: «61 21 652 — три штуки», «нашли ещё пять», «исправь последнее на 5», «исправь артикул на 52 303», «удали последнюю запись»</span>
       </div>
     </div>
     <div class="alert" id="alert" role="status" aria-live="assertive"></div>
@@ -250,7 +256,12 @@ h1{font-family:var(--f-display);font-weight:600;font-size:22px;letter-spacing:.0
     <summary>Ревизия и остатки</summary>
     <div class="in">
       <div class="blk"><strong id="auditTitle">—</strong><p id="auditInfo"></p></div>
-      <div class="blk">
+      <div class="blk" id="finishBlk">
+        <strong>Завершить ревизию</strong>
+        <p>Когда всё посчитано, зафиксируйте итог. Ревизия закроется на всех телефонах, результат выгрузится в Excel и останется в истории.</p>
+        <div id="finishBox"><button class="btn danger" type="button" id="finishBtn">Завершить ревизию…</button></div>
+      </div>
+      <div class="blk" id="updBlk">
         <strong>Обновить остатки, не прерывая ревизию</strong>
         <p>Выгрузите из 1С свежие остатки тем же отчётом и загрузите файл. Посчитанное сохранится, обновится «Учёт».</p>
         <label class="chk"><input type="checkbox" id="adjFact" checked> Поправить факт посчитанных позиций на движение после подсчёта (списали 1 — факт уменьшится на 1)</label>
@@ -263,6 +274,7 @@ h1{font-family:var(--f-display);font-weight:600;font-size:22px;letter-spacing:.0
         <div><input type="file" id="file" accept=".xlsx,.xls"></div>
         <div id="importConfirm"></div>
       </div>
+      <div class="blk"><strong>История ревизий</strong><div id="history" class="hist"><p>Загрузка…</p></div></div>
       <div class="blk"><button class="btn" type="button" id="logoutBtn">Выйти</button></div>
     </div>
   </details>
@@ -291,7 +303,7 @@ const compact = s => String(s).toLowerCase().replace(/ё/g,'е').replace(/[^0-9a
 const lower = s => String(s).toLowerCase().replace(/ё/g,'е');
 const PAGE = 150;
 
-let items = [], byKey = new Map(), counts = new Map(), audit = null, me = {name: ''};
+let items = [], byKey = new Map(), counts = new Map(), audit = null, me = {name: ''}, unknowns = [];
 let filter = 'all', catFilter = '', query = '', shown = PAGE;
 const rowEls = new Map();
 let toastT;
@@ -311,10 +323,16 @@ const LocalStore = {
   async saveCounts(id, recs){ const c = lsGet('rv-counts-' + id, {}); for (const [a, r] of recs) c[a] = r; lsSet('rv-counts-' + id, c); },
   async deleteCount(id, art){ const c = lsGet('rv-counts-' + id, {}); delete c[art]; lsSet('rv-counts-' + id, c); },
   async logEvent(){},
+  async loadUnknowns(id){ return lsGet('rv-unk-' + id, []); },
+  async addUnknown(r){ const l = lsGet('rv-unk-' + r.audit_id, []); const row = Object.assign({id: Date.now() + Math.random(), at: new Date().toISOString(), resolved: false}, r); l.push(row); lsSet('rv-unk-' + r.audit_id, l); return row; },
+  async resolveUnknown(auditId, id, note){ const l = lsGet('rv-unk-' + auditId, []); const r = l.find(x => x.id === id); if (r) { r.resolved = true; r.resolved_note = note; } lsSet('rv-unk-' + auditId, l); },
   async newAudit(title, stock, fname){ const a = {id: 'L' + Date.now(), title, created_at: new Date().toISOString(), stock, stock_ver: String(Date.now()), stock_at: new Date().toISOString(), stock_file: fname}; lsSet('rv-audit', a); return a; },
   async updateStock(a, stock, fname){ const n = Object.assign({}, a, {stock, stock_ver: String(Date.now()), stock_at: new Date().toISOString(), stock_file: fname}); lsSet('rv-audit', n); return n; },
   async ai(){ return null; },
-  async logout(){}
+  async logout(){},
+  async finishAudit(a, by){ const h = lsGet('rv-history', []); h.unshift(Object.assign({}, a, {active: false, finished_at: new Date().toISOString(), finished_by: by})); lsSet('rv-history', h.slice(0, 20)); lsSet('rv-hcounts-' + a.id, lsGet('rv-counts-' + a.id, {})); try { localStorage.removeItem('rv-audit'); } catch(e) {} },
+  async listAudits(){ return lsGet('rv-history', []); },
+  async getAudit(id){ return lsGet('rv-history', []).find(a => a.id === id) || null; }
 };
 const SbStore = {
   mode: 'cloud', sb: null, ch: null,
@@ -330,6 +348,9 @@ const SbStore = {
     return {name: this.name(data.user)};
   },
   async logout(){ await this.sb.auth.signOut(); },
+  async finishAudit(a, by){ const {error} = await this.sb.from('audits').update({active: false, finished_at: new Date().toISOString(), finished_by: by}).eq('id', a.id); if (error) throw error; },
+  async listAudits(){ const {data, error} = await this.sb.from('audits').select('id,title,created_at,finished_at,finished_by,active').eq('active', false).order('created_at', {ascending: false}).limit(20); if (error) throw error; return data; },
+  async getAudit(id){ const {data, error} = await this.sb.from('audits').select('*').eq('id', id).single(); if (error) throw error; return data; },
   async currentAudit(){
     const {data, error} = await this.sb.from('audits').select('*').eq('active', true).order('created_at', {ascending: false}).limit(1);
     if (error) throw error; return data[0] || null;
@@ -339,12 +360,13 @@ const SbStore = {
     if (error) throw error;
     const o = {}; for (const r of data) o[r.art] = fromRow(r); return o;
   },
-  subscribe(id, onCount, onAudit){
+  subscribe(id, onCount, onAudit, onUnknown){
     if (this.ch) this.sb.removeChannel(this.ch);
     this.ch = this.sb.channel('audit-' + id)
       .on('postgres_changes', {event: '*', schema: 'public', table: 'counts', filter: 'audit_id=eq.' + id}, p => onCount(p))
       .on('postgres_changes', {event: 'DELETE', schema: 'public', table: 'counts'}, p => { if (p.old && p.old.audit_id === id) onCount(p); })
       .on('postgres_changes', {event: '*', schema: 'public', table: 'audits'}, () => onAudit())
+      .on('postgres_changes', {event: '*', schema: 'public', table: 'unknowns', filter: 'audit_id=eq.' + id}, p => onUnknown && onUnknown(p))
       .subscribe(st => { if (st === 'SUBSCRIBED') setSync('on', 'Онлайн · общая база'); else if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') setSync('local', 'Нет связи — переподключаюсь'); });
   },
   row(id, art, r){ return {audit_id: id, art, q: r.q, b: r.b ?? null, adj: r.adj || 0, x: !!r.x, name: r.name || null, price: r.price || null, by_name: r.by || null, updated_at: new Date(r.t || Date.now()).toISOString()}; },
@@ -352,6 +374,9 @@ const SbStore = {
   async saveCounts(id, recs){ if (!recs.length) return; const {error} = await this.sb.from('counts').upsert(recs.map(([a, r]) => this.row(id, a, r))); if (error) throw error; },
   async deleteCount(id, art){ const {error} = await this.sb.from('counts').delete().eq('audit_id', id).eq('art', art); if (error) throw error; },
   async logEvent(ev){ try { await this.sb.from('events').insert(ev); } catch(e) {} },
+  async loadUnknowns(id){ const {data, error} = await this.sb.from('unknowns').select('*').eq('audit_id', id).order('at', {ascending: true}).range(0, 4999); if (error) throw error; return data; },
+  async addUnknown(r){ const {data, error} = await this.sb.from('unknowns').insert(r).select().single(); if (error) throw error; return data; },
+  async resolveUnknown(auditId, id, note){ const {error} = await this.sb.from('unknowns').update({resolved: true, resolved_note: note}).eq('id', id); if (error) throw error; },
   async newAudit(title, stock, fname){
     await this.sb.from('audits').update({active: false}).eq('active', true);
     const {data, error} = await this.sb.from('audits').insert({title, stock, stock_ver: String(Date.now()), stock_at: new Date().toISOString(), stock_file: fname, active: true}).select().single();
@@ -421,8 +446,8 @@ function renderStats(){
   $('#bar').innerHTML = `<span class="b-ok" style="width:${pct(ok)}%"></span><span class="b-short" style="width:${pct(sh)}%"></span><span class="b-over" style="width:${pct(Math.max(0, done - ok - sh))}%"></span>`;
   $('#stats').innerHTML = `<span>Посчитано <b class="num">${done}</b> из <b class="num">${total}</b> (${Math.floor(pct(done))}%)</span><span>Совпадает <b class="num">${ok}</b></span>` +
     `<span class="s-short">Недостача <b class="num">${sh}</b> поз. · <b class="num">${money(shSum)}</b></span><span class="s-over">Излишек <b class="num">${ov}</b> поз. · <b class="num">${money(ovSum)}</b></span>` + (ex ? `<span>Сверх учёта <b class="num">${ex}</b></span>` : '');
-  const cnt = {all: total + ex, todo: total - done, done: done + ex, diff: sh + ov, extra: ex};
-  $('#chips').innerHTML = [['all','Все'],['todo','Не посчитано'],['done','Посчитано'],['diff','Расхождения'],['extra','Сверх учёта']]
+  const cnt = {all: total + ex, todo: total - done, done: done + ex, diff: sh + ov, extra: ex, unk: unknowns.filter(u => !u.resolved).length};
+  $('#chips').innerHTML = [['all','Все'],['todo','Не посчитано'],['done','Посчитано'],['diff','Расхождения'],['extra','Сверх учёта'],['unk','Нераспознанные']]
     .map(([k, l]) => `<button type="button" class="chip" data-f="${k}" aria-pressed="${filter === k}">${l}<span class="c">${cnt[k]}</span></button>`).join('');
 }
 function buildRow(it){
@@ -451,6 +476,7 @@ function updateRow(it){
   else d.innerHTML = `<span class="pill ${s.st}">${s.d > 0 ? '+' : '−'}${fmtQ(Math.abs(s.d))}</span>` + (it.price ? `<span class="sum">${s.d > 0 ? '+' : '−'}${money(Math.abs(s.d * it.price))}</span>` : '');
 }
 function renderList(){
+  if (filter === 'unk') { renderUnknowns(); return; }
   const rows = items.filter(matches); if (query) rows.sort((a, b) => rank(a) - rank(b));
   const frag = document.createDocumentFragment();
   const hdr = document.createElement('div'); hdr.className = 'row hdr';
@@ -458,7 +484,7 @@ function renderList(){
   frag.appendChild(hdr);
   for (const it of rows.slice(0, shown)) frag.appendChild(rowEls.get(it.key) || buildRow(it));
   if (rows.length > shown) { const m = document.createElement('div'); m.className = 'more'; m.innerHTML = `<button class="btn" type="button" id="moreBtn">Показать ещё (${rows.length - shown})</button>`; frag.appendChild(m); }
-  if (!items.length) { const e = document.createElement('div'); e.className = 'empty-audit'; e.innerHTML = '<b>Ревизия ещё не начата.</b><span>Загрузите выгрузку остатков из 1С в разделе «Ревизия и остатки» ниже.</span>'; frag.appendChild(e); $('#panel').open = true; }
+  if (!items.length) { const e = document.createElement('div'); e.className = 'empty-audit'; e.innerHTML = '<b>Активной ревизии нет.</b><span>Загрузите выгрузку остатков из 1С в разделе «Ревизия и остатки» ниже.</span>'; frag.appendChild(e); $('#panel').open = true; }
   else if (!rows.length) { const e = document.createElement('div'); e.className = 'empty'; e.textContent = 'Ничего не найдено по текущему фильтру.'; frag.appendChild(e); }
   $('#list').replaceChildren(frag);
 }
@@ -543,6 +569,7 @@ function tryArtAt(toks, i){
   if (t.k !== 'n') return null;
   const run = []; for (let j = i; j < toks.length && toks[j].k === 'n' && run.length < 3; j++) run.push(toks[j].v);
   for (const L of [3, 2]) if (run.length >= L) { const it = findArt(run.slice(0, L)); if (it) return {it, len: L}; }
+  if (run.length >= 3 && run[0] === '61' && run[1].length <= 3 && run[2].length <= 4) return {bad: true, len: 3, v: run.slice(0, 3).map(x => String(+x)).join('/')};
   if (t.v.length >= 5) {
     const hits = items.filter(x => !x.extra && t.v.startsWith(x.sArt));
     const exact = hits.find(x => x.sArt === t.v); if (exact) return {it: exact, len: 1};
@@ -572,7 +599,7 @@ function parseLocal(text){
       if (hit.rest != null) cur.qty = hit.rest; else if (cur.nums.length) cur.qty = +cur.nums.pop();
       i += hit.len - 1; continue;
     }
-    if ((cur.it || cur.amb) && cur.qty == null) cur.qty = +t.v; else cur.nums.push(t.v);
+    if ((cur.it || cur.amb || cur.bad) && cur.qty == null) cur.qty = +t.v; else cur.nums.push(t.v);
   }
   done();
   for (const c of cmds) {
@@ -610,7 +637,7 @@ function candidatesFor(text){
 }
 
 /* ---------- voice: applying and feedback ---------- */
-let voiceLog = [];
+let voiceLog = [], lastEvent = null;
 function applyCmd(it, mode, n, text, source){
   const cur = counts.get(it.key), prev = cur && cur.q != null ? cur.q : null;
   let q = mode === 'add' ? (prev || 0) + n : mode === 'sub' ? Math.max(0, (prev || 0) - n) : n;
@@ -618,7 +645,7 @@ function applyCmd(it, mode, n, text, source){
   setCount(it, q);
   lastItem = it; lastAt = Date.now();
   store.logEvent({audit_id: audit.id, art: it.art, mode, n, prev, q, text, source, by_name: me.name});
-  addLog({kind: 'ok', it, prev, q, mode, n, text, source});
+  addLog({kind: 'ok', it, prev, q, mode, n, text, source}); lastEvent = {type: 'ok', e: voiceLog[0]};
   query = it.art; $('#q').value = it.art; renderList();
   signal(it, q, mode, n);
 }
@@ -631,7 +658,6 @@ function signal(it, q, mode, n){
     box.innerHTML = `<span class="art">${esc(it.art)}</span><span>✓ сходится: ${fmtQ(q)} шт.</span>`;
     if ($('#speakAll').checked) speak(`${short}. ${mode === 'add' ? 'Плюс ' + fmtQ(n) + '. ' : ''}${fmtQ(q)}, сходится`);
   } else {
-    beep('bad');
     box.className = 'alert bad show';
     box.innerHTML = `<span class="art">${esc(it.art)}</span><span>НЕ БЬЁТСЯ: по учёту ${fmtQ(it.book)}, посчитано ${fmtQ(q)} (${d > 0 ? '+' : '−'}${fmtQ(Math.abs(d))})</span>`;
     if ($('#speakBad').checked || $('#speakAll').checked) speak(`Не бьётся. ${short}. По учёту ${fmtQ(it.book)}, посчитано ${fmtQ(q)}.` + (d < 0 ? ' Если есть ещё, скажите: ещё.' : ''));
@@ -662,7 +688,7 @@ function renderLog(){
       const ch = e.mode === 'set' ? (e.prev == null ? `факт ${fmtQ(e.q)}` : `было ${fmtQ(e.prev)} → ${fmtQ(e.q)}`) : `${e.mode === 'add' ? '+' : '−'}${fmtQ(e.n)} → итого ${fmtQ(e.q)}`;
       return `<div class="vl ok"><span class="art">${esc(e.it.art)}</span><span class="vn">${esc(e.it.name)}<small>«${esc(e.text)}»${e.source === 'ai' ? ' · разобрал ИИ' : ''}</small></span>
         <span class="vc num">${ch} <span class="pill ${cls}">${d === 0 ? '✓' : (d > 0 ? '+' : '−') + fmtQ(Math.abs(d))}</span></span>
-        ${e.undone ? '<span class="vu">отменено</span>' : `<button class="btn vu" type="button" data-undo="${e.id}">Отменить</button>`}</div>`;
+        ${e.superseded ? '<span class="vu">исправлено ниже</span>' : e.undone ? '<span class="vu">отменено</span>' : `<button class="btn vu" type="button" data-undo="${e.id}">Отменить</button>`}</div>`;
     }
     if (e.kind === 'busy') return `<div class="vl busy"><span class="vn">Разбираю: «${esc(e.text)}»…</span></div>`;
     if (e.kind === 'ign') return `<div class="vl ign"><span class="vn">Пропущено как не относящееся к ревизии<small>«${esc(e.text)}»</small></span></div>`;
@@ -675,7 +701,7 @@ function undo(e){
   const rec = e.prev == null ? null : Object.assign({}, counts.get(e.it.key), {q: e.prev, t: Date.now(), by: me.name});
   persist(e.it.key, rec);
   store.logEvent({audit_id: audit.id, art: e.it.art, mode: 'undo', n: null, prev: e.q, q: e.prev, text: 'отмена', source: 'voice', by_name: me.name});
-  e.undone = true; updateRow(e.it); renderStats(); renderLog(); return true;
+  e.undone = true; if (e.replaces) e.replaces.superseded = false; updateRow(e.it); renderStats(); renderLog(); return true;
 }
 $('#vlog').addEventListener('click', ev => {
   const u = ev.target.closest('[data-undo]');
@@ -684,6 +710,7 @@ $('#vlog').addEventListener('click', ev => {
   if (p) {
     const [id, i] = p.dataset.pick.split(':'); const e = voiceLog.find(x => x.id === id); if (!e) return;
     voiceLog = voiceLog.filter(x => x !== e); const it = e.choices[+i];
+    if (e.unkId != null) { const u = unknowns.find(x => x.id === e.unkId); if (u) { u.resolved = true; u.resolved_note = 'выбрано ' + it.art + ' (' + me.name + ')'; store.resolveUnknown(audit.id, u.id, u.resolved_note).catch(() => {}); renderStats(); } }
     if (e.qty != null) applyCmd(it, e.mode || 'set', e.qty, e.text, 'pick');
     else { renderLog(); query = it.art; $('#q').value = it.art; renderList(); const inp = rowEls.get(it.key)?.querySelector('input'); if (inp) { inp.focus(); inp.select(); } }
   }
@@ -698,17 +725,17 @@ function handleText(text, alts){
 async function handleOne(text, alts){
   if (!audit || !items.length) return;
   rebuildArtMap();
-  if (/^(отмена|отмени|отменить|отменяй|назад)(?=$|[\s.,!])/.test(lower(text).trim())) {
-    const e = voiceLog.find(x => x.kind === 'ok' && !x.undone);
-    if (undo(e)) { speak('Отменено'); } return;
-  }
+  if (voiceCommand(text)) return;
   // try the main transcript and recognizer alternatives with the local parser first
   let best = null;
   for (const t of [text, ...alts]) { const c = parseLocal(t); if (c.length && c.every(x => x.ok)) { best = {t, c}; break; } }
   if (best) { for (const c of best.c) applyCmd(c.it, c.mode, c.qty, text, 'voice'); recentTexts.push(text); recentTexts = recentTexts.slice(-3); return; }
-  // unclear: only bother the AI if the phrase looks like it is about parts
-  if (!looksRelevant(text) && !alts.some(looksRelevant)) { if (text.split(/\s+/).length >= 2) addLog({kind: 'ign', text}); return; }
   const local = parseLocal(text);
+  // a full article was said, but it is not in the stock file: no guessing, record it
+  const missing = local.find(c => c.bad);
+  if (missing) { for (const c of local.filter(c => c.ok)) applyCmd(c.it, c.mode, c.qty, text, 'voice'); recordUnknown(text, missing.bad, missing.qty, missing.mode, 'нет в остатках'); return; }
+  // unclear: only bother the AI if the phrase looks like it is about parts
+  if (!looksRelevant(text) && !alts.some(looksRelevant)) return;
   if ($('#useAI').checked && store.mode === 'cloud') {
     const busy = {kind: 'busy', text}; addLog(busy);
     const cands = candidatesFor([text, ...alts].join(' '));
@@ -719,19 +746,153 @@ async function handleOne(text, alts){
         candidates: cands.map(it => { const c = counts.get(it.key); return {art: it.art, name: it.name, book: it.book, counted: c && c.q != null ? c.q : null}; })});
     } catch(e) { err = e; }
     voiceLog = voiceLog.filter(x => x !== busy); renderLog();
-    if (r && r.ignore) { addLog({kind: 'ign', text}); return; }
+    if (r && r.ignore) return;
     const cmds = (r && Array.isArray(r.commands) ? r.commands : []).map(c => ({it: artMap.get(String(c.art).trim()), qty: +c.qty, mode: ['set','add','sub'].includes(c.mode) ? c.mode : 'set'})).filter(c => c.it && isFinite(c.qty) && c.qty >= 0);
     if (cmds.length) { for (const c of cmds) applyCmd(c.it, c.mode, c.qty, text, 'ai'); recentTexts.push(text); recentTexts = recentTexts.slice(-3); return; }
     const choices = local.find(c => c.amb)?.amb || cands.slice(0, 4);
     const q1 = local.find(c => c.qty != null);
-    addLog({kind: 'err', msg: (r && r.question) || (err ? 'ИИ-помощник не ответил. Повторите или выберите:' : 'Не понял, какой артикул. Повторите или выберите:'), text, choices, qty: q1 ? q1.qty : null, mode: q1 ? q1.mode : 'set'});
-    beep('bad'); speak((r && r.question) || 'Не понял, повторите');
+    recordUnknown(text, guessArt(local), q1 ? q1.qty : guessQty(local), q1 ? q1.mode : (local[0] && local[0].mode) || 'set', err ? 'не распознан (ИИ не ответил)' : 'не распознан', choices);
     return;
   }
   const choices = local.find(c => c.amb)?.amb || candidatesFor(text).slice(0, 4);
   const q1 = local.find(c => c.qty != null);
-  addLog({kind: 'err', msg: local.some(c => c.it && c.qty == null) ? 'Не услышал количество — повторите с числом' : 'Не понял, какой артикул. Повторите или выберите:', text, choices, qty: q1 ? q1.qty : null, mode: q1 ? q1.mode : 'set'});
-  speak('Не понял, повторите');
+  if (local.some(c => c.it && c.qty == null)) { addLog({kind: 'err', msg: 'Не услышал количество — повторите с числом', text, choices, qty: null, mode: 'set'}); speak('Не услышал количество, повторите'); return; }
+  recordUnknown(text, guessArt(local), q1 ? q1.qty : guessQty(local), q1 ? q1.mode : (local[0] && local[0].mode) || 'set', 'не распознан', choices);
+}
+
+/* ---------- voice commands about the last record ---------- */
+function lastRecord(){ return voiceLog.find(x => x.kind === 'ok' && !x.undone && !x.superseded); }
+function voiceCommand(text){
+  const t = lower(text).replace(/[.,!?]/g, ' ').replace(/\s+/g, ' ').trim();
+  const words = t.split(' ');
+  const last = lastRecord();
+  // delete / cancel the last record
+  const isDelete = /^(отмена|отмени|отменить|отменяй|назад)$/.test(t)
+    || (/(^| )(удали|удалить|удаляй|сотри|стереть|сотрите|удалите|отмени|отменить)( |$)/.test(t) && (/последн|запис|это|предыдущ/.test(t) || words.length <= 3))
+    || (/(^| )(убери|убрать)( |$)/.test(t) && /последн|запис/.test(t));
+  if (isDelete) {
+    if (!last) { speak('Нечего удалять'); addLog({kind: 'err', msg: 'Нет записи, которую можно удалить', text}); return true; }
+    undo(last);
+    speak(`Удалено. ${last.it.name.split(/[\s,(]+/).slice(0, 3).join(' ')}` + (last.prev != null ? `, вернул ${fmtQ(last.prev)}` : ''));
+    return true;
+  }
+  // correct the last record: "исправь последнее на 5", "поправь на пять", "не три а пять"
+  const isFix = (/(исправ|поправ|измени|замени|корректир|переправ)/.test(t) && (/последн|предыдущ| на /.test(' ' + t + ' ') || words.length <= 4))
+    || /^не \S+( \S+)? а /.test(t);
+  if (isFix) {
+    // is a corrected article named? e.g. "исправь артикул на 52 303", "поправь на 61 52 303"
+    const rest = t.replace(/^.*?(исправ\S*|поправ\S*|измени\S*|замени\S*|корректир\S*|переправ\S*)/, '').replace(/(последн\S*|предыдущ\S*|артикул\S*|запис\S*|на|это)(?= |$)/g, ' ');
+    const named = parseLocal(rest).find(c => c.it);
+    if (named) return fixArticle(named.it, named.qty, text);
+    const nums = tokenize(t.replace(/^.*? а /, m => /^не /.test(t) ? '' : m)).filter(x => x.k === 'n').map(x => +x.v);
+    const n = nums.length ? nums[nums.length - 1] : null;
+    if (!last) { speak('Нечего исправлять'); addLog({kind: 'err', msg: 'Нет записи, которую можно исправить', text}); return true; }
+    if (n == null || !isFinite(n)) { speak('Скажите, на сколько исправить'); addLog({kind: 'err', msg: 'Не услышал число для исправления', text}); return true; }
+    // fix means: the last record should have been N instead of what was said
+    const it = last.it, cur = counts.get(it.key), curQ = cur && cur.q != null ? cur.q : 0;
+    const target = last.mode === 'add' ? Math.max(0, curQ - last.n + n) : last.mode === 'sub' ? Math.max(0, curQ + last.n - n) : n;
+    last.superseded = true;
+    applyCmd(it, 'set', target, text, 'fix');
+    if (voiceLog[0] && voiceLog[0].kind === 'ok') voiceLog[0].replaces = last; renderLog();
+    if (status(it).st === 'ok' || !$('#speakBad').checked) speak(`Исправлено. ${it.name.split(/[\s,(]+/).slice(0, 3).join(' ')}, ${fmtQ(target)}`);
+    return true;
+  }
+  return false;
+}
+
+function fixArticle(it, qtyOverride, text){
+  // the last thing said was not in stock -> move it to the right article
+  if (lastEvent && lastEvent.type === 'unk') {
+    const {row, log} = lastEvent;
+    const qty = qtyOverride != null ? qtyOverride : row.qty;
+    const u = unknowns.find(x => x.text === row.text && !x.resolved) || null;
+    if (u) { u.resolved = true; u.resolved_note = 'исправлено голосом на ' + it.art + ' (' + me.name + ')'; store.resolveUnknown(audit.id, u.id, u.resolved_note).catch(() => {}); }
+    voiceLog = voiceLog.filter(x => x !== log);
+    renderStats(); if (filter === 'unk') renderList();
+    if (qty == null) { speak(`Артикул ${sayArt(it.art)}. Сколько штук?`); addLog({kind: 'err', msg: `Артикул исправлен на ${it.art}, но количество не было названо — скажите его`, text}); lastItem = it; lastAt = Date.now(); return true; }
+    applyCmd(it, row.mode || 'set', qty, text, 'fix');
+    if (status(it).st === 'ok' || !$('#speakBad').checked) speak(`Исправлено на ${sayArt(it.art)}. ${fmtQ(qty)}`);
+    return true;
+  }
+  // the last record went to the wrong article -> move its quantity
+  const last = lastRecord();
+  if (!last) { speak('Нечего исправлять'); return true; }
+  if (last.it === it) { speak('Это тот же артикул'); return true; }
+  const qty = qtyOverride != null ? qtyOverride : last.n;
+  undo(last);
+  applyCmd(it, last.mode === 'sub' ? 'sub' : last.mode, qty, text, 'fix');
+  if (status(it).st === 'ok' || !$('#speakBad').checked) speak(`Перенёс на ${sayArt(it.art)}. ${fmtQ(qty)}`);
+  return true;
+}
+
+/* ---------- unrecognised / missing articles ---------- */
+function guessArt(local){
+  const nums = local.flatMap(c => c.nums || []);
+  const b = local.find(c => c.bad); if (b) return b.bad;
+  return nums.length >= 2 ? nums.slice(0, nums.length >= 3 ? 3 : 2).join('/') : '';
+}
+function guessQty(local){ const nums = local.flatMap(c => c.nums || []); return nums.length >= 4 ? +nums[3] : nums.length === 1 || nums.length === 3 ? +nums[nums.length - 1] : null; }
+const sayArt = a => String(a || '').split('/').join(' ');
+async function recordUnknown(text, art, qty, mode, reason, choices){
+  const row = {audit_id: audit.id, text, art: art || null, qty: qty != null && isFinite(qty) ? qty : null, mode: mode || 'set', reason, by_name: me.name};
+  const notInStock = reason === 'нет в остатках';
+  speak(notInStock ? `Артикула ${sayArt(art)} нет в остатках. Записал в нераспознанные.` : 'Артикул не распознан. Записал в нераспознанные.');
+  const box = $('#alert'); box.className = 'alert bad show';
+  box.innerHTML = `<span>${notInStock ? 'Нет в остатках: <span class="art">' + esc(art) + '</span>' : 'Не распознан артикул'}${row.qty != null ? ' · ' + fmtQ(row.qty) + ' шт.' : ''} — записано в «Нераспознанные»</span>`;
+  clearTimeout(signal.t); signal.t = setTimeout(() => box.classList.remove('show'), 10000);
+  const logE = {kind: 'err', msg: (notInStock ? 'Нет в остатках — записано в «Нераспознанные»' : 'Не распознан — записано в «Нераспознанные»') + (choices && choices.length ? '. Если это одна из позиций, выберите:' : ''), text, choices: choices || [], qty: row.qty, mode: row.mode}; addLog(logE); lastEvent = {type: 'unk', log: logE, row};
+  try { const saved = await store.addUnknown(row); logE.unkId = saved.id; if (!unknowns.some(u => u.id === saved.id)) unknowns.push(saved); }
+  catch(e) { unknowns.push(Object.assign({id: 'tmp' + Date.now(), at: new Date().toISOString(), resolved: false}, row)); toast('Нераспознанное не сохранилось в базе: ' + (e.message || e)); }
+  renderStats(); if (filter === 'unk') renderList();
+}
+function renderUnknowns(){
+  const frag = document.createDocumentFragment();
+  const bar = document.createElement('div'); bar.className = 'row hdr unk-bar';
+  bar.innerHTML = `<div style="grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;text-transform:none;letter-spacing:0;font-size:13px">
+    <span>Фразы, где артикул не распознан или его нет в остатках. Впишите правильный артикул и нажмите «Записать», или уберите лишнее.</span>
+    <button class="btn" type="button" id="unkExport">Выгрузить нераспознанные</button></div>`;
+  frag.appendChild(bar);
+  const list = unknowns.slice().sort((a, b) => (a.resolved - b.resolved) || (Date.parse(b.at) - Date.parse(a.at)));
+  if (!list.length) { const e = document.createElement('div'); e.className = 'empty'; e.textContent = 'Нераспознанных артикулов нет.'; frag.appendChild(e); }
+  for (const u of list) {
+    const el = document.createElement('div'); el.className = 'row unk' + (u.resolved ? ' done' : ''); el.dataset.uid = u.id;
+    const when = new Date(u.at || Date.now()).toLocaleString('ru-RU', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'});
+    el.innerHTML = `<div class="art">${esc(u.art || '—')}</div>
+      <div class="name"><span class="n">«${esc(u.text)}»</span><span class="meta">${esc(u.reason || '')} · ${esc(u.by_name || '')} · ${when}${u.resolved ? ' · ' + esc(u.resolved_note || 'решено') : ''}</span></div>
+      <div class="book num">${u.qty != null ? fmtQ(u.qty) + ' шт.' : '—'}</div>
+      ${u.resolved ? '<div></div><div></div>' : `<div class="fact"><input type="text" placeholder="61/__/___" value="${esc(u.art && artMap.has(u.art) ? u.art : (u.art || ''))}" aria-label="Правильный артикул" class="uart"></div>
+      <div class="diff" style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap"><button class="btn" type="button" data-uapply>Записать</button><button class="btn" type="button" data-uclose>Убрать</button></div>`}`;
+    frag.appendChild(el);
+  }
+  $('#list').replaceChildren(frag);
+}
+$('#list').addEventListener('click', async e => {
+  if (e.target.id === 'unkExport') { exportUnknowns(unknowns, audit && audit.title); return; }
+  const row = e.target.closest('.row.unk'); if (!row) return;
+  const u = unknowns.find(x => String(x.id) === row.dataset.uid); if (!u) return;
+  if (e.target.matches('[data-uclose]')) {
+    u.resolved = true; u.resolved_note = 'убрано (' + me.name + ')'; renderStats(); renderList();
+    try { await store.resolveUnknown(audit.id, u.id, u.resolved_note); } catch(err) { toast('Не сохранилось: ' + (err.message || err)); }
+  }
+  if (e.target.matches('[data-uapply]')) {
+    rebuildArtMap();
+    const raw = row.querySelector('.uart').value.trim().replace(/[\s.\-\\]+/g, '/');
+    const it = artMap.get(raw) || artMap.get('61/' + raw);
+    if (!it) { toast(`Артикула «${raw}» нет в остатках. Его можно добавить вручную как «сверх учёта» после ревизии.`); return; }
+    if (u.qty == null) { query = it.art; $('#q').value = it.art; filter = 'all'; renderStats(); renderList(); const inp = rowEls.get(it.key)?.querySelector('input'); if (inp) { inp.focus(); inp.select(); } toast('Количество не было названо — введите его в строке'); }
+    else applyCmd(it, u.mode || 'set', +u.qty, u.text, 'fix');
+    u.resolved = true; u.resolved_note = 'записано в ' + it.art + ' (' + me.name + ')'; renderStats(); if (filter === 'unk') renderList();
+    try { await store.resolveUnknown(audit.id, u.id, u.resolved_note); } catch(err) {}
+  }
+});
+function unknownRows(list){
+  return list.map(u => [new Date(u.at || Date.now()).toLocaleString('ru-RU'), u.by_name || '', u.text || '', u.art || '', u.qty ?? '', u.mode === 'add' ? 'прибавить' : u.mode === 'sub' ? 'убавить' : 'количество', u.reason || '', u.resolved ? (u.resolved_note || 'решено') : 'не решено']);
+}
+const UNK_HEAD = ['Время','Кто','Фраза','Артикул (как услышан)','Кол-во','Действие','Причина','Статус'];
+function unknownSheet(list){ const ws = XLSX.utils.aoa_to_sheet([UNK_HEAD, ...unknownRows(list)]); ws['!cols'] = [18,16,50,18,8,12,24,30].map(w => ({wch: w})); return ws; }
+function exportUnknowns(list, title){
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, unknownSheet(list), 'Нераспознанные');
+  XLSX.writeFile(wb, `Нераспознанные_артикулы_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
 /* ---------- voice: continuous listening ---------- */
@@ -801,13 +962,24 @@ function speak(t){
 /* ---------- audit loading and sync ---------- */
 async function loadAudit(){
   audit = await store.currentAudit();
-  counts = new Map();
+  counts = new Map(); unknowns = [];
+  $('#finishBlk').hidden = $('#updBlk').hidden = !audit;
+  $('#finishBox').innerHTML = ''; $('#finishBox').appendChild(finishBtnEl);
+  renderHistory();
   if (!audit) { setStock([]); renderAll(); return; }
   setStock(audit.stock || []);
   const c = await store.loadCounts(audit.id);
   counts = new Map(Object.entries(c)); syncExtras();
   shown = PAGE; renderAll();
-  store.subscribe(audit.id, onRemoteCount, onRemoteAudit);
+  try { unknowns = await store.loadUnknowns(audit.id); } catch(e) { unknowns = []; }
+  renderStats(); if (filter === 'unk') renderList();
+  store.subscribe(audit.id, onRemoteCount, onRemoteAudit, onRemoteUnknown);
+}
+function onRemoteUnknown(p){
+  const r = p.new; if (!r || !r.id) return;
+  const i = unknowns.findIndex(x => x.id === r.id);
+  if (i >= 0) unknowns[i] = r; else unknowns.push(r);
+  renderStats(); if (filter === 'unk') renderList();
 }
 function onRemoteCount(p){
   if (p.eventType === 'DELETE') counts.delete(p.old.art);
@@ -821,8 +993,8 @@ let auditT;
 function onRemoteAudit(){
   clearTimeout(auditT);
   auditT = setTimeout(async () => {
-    const a = await store.currentAudit().catch(() => null);
-    if (!a) return;
+    let a; try { a = await store.currentAudit(); } catch(e) { return; }
+    if (!a) { if (audit) { stopListening(); toast('Ревизия завершена'); await loadAudit(); } renderHistory(); return; }
     if (!audit || a.id !== audit.id) { toast('Начата новая ревизия'); await loadAudit(); return; }
     if (a.stock_ver !== audit.stock_ver) { audit = a; setStock(a.stock || []); syncExtras(); renderAll(); toast('Остатки обновлены'); }
   }, 400);
@@ -894,20 +1066,98 @@ $('#updFile').addEventListener('change', async e => {
   } catch(err) { box.innerHTML = `<div class="confirm">Не получилось прочитать файл: ${esc(err.message)}</div>`; }
 });
 $('#adjFact').addEventListener('change', () => { const f = $('#updFile'); if (f.files[0]) f.dispatchEvent(new Event('change')); });
-$('#exportBtn').addEventListener('click', () => {
+function exportExcel(list, cmap, title, when, unk){
   const head = ['№','Категория','Номенклатура','Артикул','Цена за ед., ₸','Учёт','Факт','Разница','Сумма разницы, ₸','Статус','Кто посчитал','Когда','Движение по 1С после подсчёта'];
   const st = {none: 'Не посчитано', ok: 'Сходится', short: 'Недостача', over: 'Излишек'};
-  const all = [], diffs = [];
-  items.forEach((it, i) => {
-    const s = status(it), c = s.c;
-    const row = [i + 1, it.extra ? 'Сверх учёта' : it.cat, it.name, it.art, it.price, it.book, c ? c.q : '', s.st === 'none' ? '' : s.d,
-      s.st === 'none' ? '' : Math.round(s.d * it.price * 100) / 100, it.extra ? 'Сверх учёта' : st[s.st], c ? (c.by || '') : '', c && c.t ? new Date(c.t).toLocaleString('ru-RU') : '', c && c.adj ? c.adj : ''];
-    all.push(row); if (s.st === 'short' || s.st === 'over') diffs.push(row);
+  const all = [], diffs = []; let total = 0, done = 0, ok = 0, sh = 0, ov = 0, shSum = 0, ovSum = 0, bookSum = 0;
+  list.forEach((it, i) => {
+    const c = cmap.get(it.key), has = c && c.q != null, d = has ? c.q - it.book : 0;
+    const k = !has ? 'none' : d === 0 ? 'ok' : d < 0 ? 'short' : 'over';
+    if (!it.extra) { total++; bookSum += it.book * it.price; if (has) done++; }
+    if (k === 'ok') ok++; if (k === 'short') { sh++; shSum += -d * it.price; } if (k === 'over') { ov++; ovSum += d * it.price; }
+    const row = [i + 1, it.extra ? 'Сверх учёта' : it.cat, it.name, it.art, it.price, it.book, has ? c.q : '', has ? d : '',
+      has ? Math.round(d * it.price * 100) / 100 : '', it.extra ? 'Сверх учёта' : st[k], c ? (c.by || '') : '', c && c.t ? new Date(c.t).toLocaleString('ru-RU') : '', c && c.adj ? c.adj : ''];
+    all.push(row); if (k === 'short' || k === 'over') diffs.push(row);
   });
   const mk = rows => { const ws = XLSX.utils.aoa_to_sheet([head, ...rows]); ws['!cols'] = [6,28,60,14,12,8,8,9,16,14,18,18,14].map(w => ({wch: w})); return ws; };
+  const sum = XLSX.utils.aoa_to_sheet([
+    ['Ревизия', title || ''], ['Склад', 'МСЦ · ' + CONFIG.BRANCH], ['Дата выгрузки', new Date().toLocaleString('ru-RU')], [],
+    ['Позиций по учёту', total], ['Посчитано позиций', done], ['Не посчитано', total - done], ['Сходится', ok],
+    ['Недостача, позиций', sh], ['Недостача, ₸', Math.round(shSum)], ['Излишек, позиций', ov], ['Излишек, ₸', Math.round(ovSum)],
+    ['Итог (излишек − недостача), ₸', Math.round(ovSum - shSum)], ['Сумма по учёту, ₸', Math.round(bookSum)],
+    ['Нераспознанных фраз (не решено / всего)', unk ? unk.filter(u => !u.resolved).length + ' / ' + unk.length : '—']]);
+  sum['!cols'] = [{wch: 32}, {wch: 40}];
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, mk(all), 'Ревизия'); XLSX.utils.book_append_sheet(wb, mk(diffs), 'Расхождения');
-  XLSX.writeFile(wb, `Ревизия_запчасти_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  XLSX.utils.book_append_sheet(wb, sum, 'Итоги'); XLSX.utils.book_append_sheet(wb, mk(all), 'Ревизия'); XLSX.utils.book_append_sheet(wb, mk(diffs), 'Расхождения');
+  if (unk) XLSX.utils.book_append_sheet(wb, unknownSheet(unk), 'Нераспознанные');
+  XLSX.writeFile(wb, `Ревизия_запчасти_${(when ? new Date(when) : new Date()).toISOString().slice(0, 10)}.xlsx`);
+}
+$('#exportBtn').addEventListener('click', () => {
+  if (!audit) { toast('Нет активной ревизии. Прошлые ревизии выгружаются из «Истории».'); $('#panel').open = true; return; }
+  exportExcel(items, counts, audit.title, null, unknowns);
+});
+
+/* ---------- finishing an audit and history ---------- */
+const finishBtnEl = $('#finishBtn');
+finishBtnEl.addEventListener('click', () => {
+  if (!audit) return;
+  let total = 0, done = 0, todoSum = 0, sh = 0, ov = 0, shSum = 0, ovSum = 0;
+  const todo = [];
+  for (const it of items) {
+    const s = status(it);
+    if (!it.extra) { total++; if (s.st === 'none') { todo.push(it); todoSum += it.book * it.price; } else done++; }
+    if (s.st === 'short') { sh++; shSum += -s.d * it.price; } if (s.st === 'over') { ov++; ovSum += s.d * it.price; }
+  }
+  const box = $('#finishBox');
+  box.innerHTML = `<div class="confirm" style="display:grid;gap:10px">
+    <span>Посчитано <b class="num">${done}</b> из <b class="num">${total}</b>. Сейчас: недостача <b class="num">${sh}</b> поз. на <b class="num">${money(shSum)}</b>, излишек <b class="num">${ov}</b> поз. на <b class="num">${money(ovSum)}</b>.</span>
+    ${unknowns.some(u => !u.resolved) ? `<span>Нераспознанных фраз не разобрано: <b class="num">${unknowns.filter(u => !u.resolved).length}</b> — они попадут в отдельный лист Excel.</span>` : ''}
+    ${todo.length ? `<span>Не посчитано <b class="num">${todo.length}</b> поз. (по учёту на <b class="num">${money(todoSum)}</b>).</span>
+      <label class="chk"><input type="checkbox" id="zeroRest" checked> Записать непосчитанные как отсутствующие: факт 0, они уйдут в недостачу. Снимите галочку, если в отчёте они должны остаться «не посчитано».</label>` : ''}
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" type="button" id="finGo">Завершить и выгрузить в Excel</button><button class="btn" type="button" id="finNo">Отмена</button></div></div>`;
+  $('#finNo').onclick = () => { box.innerHTML = ''; box.appendChild(finishBtnEl); };
+  $('#finGo').onclick = async () => {
+    $('#finGo').disabled = true; $('#finGo').textContent = 'Завершаю…';
+    try {
+      stopListening();
+      if (todo.length && $('#zeroRest') && $('#zeroRest').checked) {
+        const recs = todo.map(it => [it.key, {q: 0, b: it.book, adj: 0, by: 'не найдено при ревизии', t: Date.now()}]);
+        for (const [k, r] of recs) counts.set(k, r);
+        await writeChain;
+        for (let i = 0; i < recs.length; i += 400) await store.saveCounts(audit.id, recs.slice(i, i + 400));
+      }
+      const fin = audit;
+      exportExcel(items, counts, fin.title, null, unknowns);
+      await store.finishAudit(fin, me.name);
+      store.logEvent({audit_id: fin.id, art: null, mode: 'finish', text: 'ревизия завершена', source: 'manual', by_name: me.name});
+      await loadAudit();
+      toast('Ревизия завершена, файл Excel сохранён');
+    } catch(err) { toast('Не удалось завершить: ' + (err.message || err)); $('#finGo').disabled = false; $('#finGo').textContent = 'Завершить и выгрузить в Excel'; }
+  };
+});
+async function renderHistory(){
+  const box = $('#history');
+  let list = [];
+  try { list = await store.listAudits(); } catch(e) { box.innerHTML = '<p>Не удалось загрузить историю.</p>'; return; }
+  if (!list.length) { box.innerHTML = '<p>Завершённых ревизий пока нет.</p>'; return; }
+  const dt = v => v ? new Date(v).toLocaleString('ru-RU', {day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'}) : '—';
+  box.innerHTML = list.map(a => `<div class="h"><span>${esc(a.title || 'Ревизия')}<small>${a.finished_at ? 'завершена ' + dt(a.finished_at) + (a.finished_by ? ' · ' + esc(a.finished_by) : '') : 'закрыта при начале новой · начата ' + dt(a.created_at)}</small></span>
+    <button class="btn" type="button" data-hist="${esc(a.id)}">Excel</button></div>`).join('');
+}
+$('#history').addEventListener('click', async e => {
+  const b = e.target.closest('[data-hist]'); if (!b) return;
+  b.disabled = true;
+  try {
+    const a = await store.getAudit(b.dataset.hist);
+    const c = store.mode === 'local' ? lsGet('rv-hcounts-' + a.id, {}) : await store.loadCounts(a.id);
+    const cmap = new Map(Object.entries(c));
+    const list = (a.stock || []).map(r => ({key: r.art, art: r.art, name: r.name, cat: r.cat || '', book: +r.book || 0, price: +r.price || 0, extra: false}));
+    const keys = new Set(list.map(i => i.key));
+    for (const [k, v] of cmap) if (v && v.x && !keys.has(k)) list.push({key: k, art: k, name: v.name || '', cat: '', book: 0, price: +v.price || 0, extra: true});
+    let unk = []; try { unk = await store.loadUnknowns(a.id); } catch(e) {}
+    exportExcel(list, cmap, a.title, a.finished_at || a.created_at, unk);
+  } catch(err) { toast('Не удалось выгрузить: ' + (err.message || err)); }
+  b.disabled = false;
 });
 
 /* ---------- list events ---------- */

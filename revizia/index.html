@@ -1,0 +1,961 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#2c5b4e">
+<title>Ревизия запчастей МСЦ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>*,*::before,*::after{box-sizing:border-box}html{-webkit-text-size-adjust:100%}:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}</style>
+<style>
+/* Layout: sticky ledger header (progress + search) over a single dense registry list; rows collapse to stacked cards on phones */
+:root{
+  --bg:#f2f3ef; --surface:#ffffff; --surface-2:#e8eae4; --ink:#1a1f24; --muted:#5b646c; --line:#d6dad2;
+  --accent:#2c5b4e; --accent-ink:#ffffff; --accent-soft:#dce9e3;
+  --short:#b23a27; --short-soft:#f6e1dc; --over:#9a6400; --over-soft:#f5ead3; --ok:#2b7a4b; --ok-soft:#dcefe2;
+  --f-display:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"SF Mono",Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#131619; --surface:#1b1f23; --surface-2:#242a2f; --ink:#e6e8e4; --muted:#97a0a7; --line:#2e353a;
+  --accent:#86c2ad; --accent-ink:#0f1a16; --accent-soft:#1f3530;
+  --short:#f08470; --short-soft:#3a2420; --over:#e3b14e; --over-soft:#372d18; --ok:#72c795; --ok-soft:#1d3226; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#131619; --surface:#1b1f23; --surface-2:#242a2f; --ink:#e6e8e4; --muted:#97a0a7; --line:#2e353a;
+  --accent:#86c2ad; --accent-ink:#0f1a16; --accent-soft:#1f3530;
+  --short:#f08470; --short-soft:#3a2420; --over:#e3b14e; --over-soft:#372d18; --ok:#72c795; --ok-soft:#1d3226; color-scheme:dark}
+html,body{background:var(--bg);color:var(--ink)}
+body{font-family:var(--f-body);font-size:14px;line-height:1.4}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--surface)}
+.wrap{max-width:1180px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--surface);border-bottom:1px solid var(--line)}
+header.top .wrap{display:grid;gap:10px;padding-block:12px}
+.head-row{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 16px;justify-content:space-between}
+h1{font-family:var(--f-display);font-weight:600;font-size:22px;letter-spacing:.01em;margin:0;text-wrap:balance}
+.sub{color:var(--muted);font-size:13px}
+.sync{font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:6px}
+.sync i{width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block}
+.sync.on i{background:var(--ok)} .sync.local i{background:var(--over)} .sync.busy i{background:var(--accent);animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.3}}
+@media (prefers-reduced-motion:reduce){.sync.busy i{animation:none}}
+
+.progress{display:grid;gap:6px}
+.bar{height:8px;background:var(--surface-2);border-radius:4px;overflow:hidden;display:flex}
+.bar span{display:block;height:100%}
+.bar .b-ok{background:var(--ok)} .bar .b-short{background:var(--short)} .bar .b-over{background:var(--over)}
+.stats{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:13px;color:var(--muted)}
+.stats b{color:var(--ink);font-weight:600}
+.stats .s-short b{color:var(--short)} .stats .s-over b{color:var(--over)}
+
+.searchbox{display:flex;gap:8px;align-items:stretch}
+.searchbox input{flex:1;min-width:0;font-family:var(--f-mono);font-size:20px;padding:10px 14px;border:2px solid var(--line);border-radius:8px;background:var(--bg)}
+.searchbox input:focus{border-color:var(--accent);outline:none;background:var(--surface)}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:8px 14px;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.btn.danger{color:var(--short);border-color:var(--short)}
+.btn:disabled{opacity:.5;cursor:default}
+.hint{font-size:12px;color:var(--muted)}
+.hint kbd{font-family:var(--f-mono);font-size:11px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:var(--bg)}
+
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding-block:14px 8px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 12px;cursor:pointer;font-size:13px}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.chip .c{font-family:var(--f-mono);opacity:.7;margin-left:4px}
+.toolbar select{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:6px 8px;width:300px;max-width:100%;min-width:0}
+.spacer{flex:1}
+
+.list{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden}
+.row{display:grid;grid-template-columns:118px minmax(0,1fr) 64px 118px 104px;gap:12px;align-items:center;padding:8px 14px;border-top:1px solid var(--line)}
+.row:first-child{border-top:0}
+.row.hdr{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);background:var(--surface-2);padding-block:7px}
+.row.hdr .r{text-align:right}
+.art{font-family:var(--f-mono);font-weight:500;font-size:14px;word-break:break-all}
+.name{min-width:0}
+.name .n{display:block}
+.name .meta{display:block;font-size:12px;color:var(--muted);margin-top:2px}
+.book{text-align:right;font-family:var(--f-mono);font-variant-numeric:tabular-nums;font-size:15px}
+.fact{display:flex;gap:4px;align-items:center;justify-content:flex-end}
+.fact input{width:76px;text-align:right;font-family:var(--f-mono);font-size:16px;padding:6px 8px;border:1.5px solid var(--line);border-radius:6px;background:var(--bg)}
+.fact input:focus{border-color:var(--accent);outline:none;background:var(--surface)}
+.fact input.counted{border-color:var(--accent);background:var(--accent-soft);font-weight:600}
+.fact input.saving{border-style:dashed}
+.fact .x{border:0;background:none;color:var(--muted);cursor:pointer;padding:4px;font-size:16px;line-height:1;width:22px}
+.fact .x:hover{color:var(--short)}
+.fact .x[hidden]{display:inline-block!important;visibility:hidden}
+.diff{text-align:right}
+.pill{display:inline-block;font-family:var(--f-mono);font-size:13px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.pill.ok{background:var(--ok-soft);color:var(--ok)}
+.pill.short{background:var(--short-soft);color:var(--short)}
+.pill.over{background:var(--over-soft);color:var(--over)}
+.pill.none{color:var(--muted);font-weight:400;background:transparent}
+.diff .sum{display:block;font-family:var(--f-mono);font-size:11px;color:var(--muted);margin-top:2px}
+.row.flash{animation:flash .9s}
+@keyframes flash{from{background:var(--accent-soft)}}
+.more{padding:12px 14px;border-top:1px solid var(--line);text-align:center}
+.empty{padding:22px 14px;color:var(--muted);display:grid;gap:12px}
+.extra-form{display:grid;grid-template-columns:140px minmax(0,1fr) 90px auto;gap:8px;align-items:center}
+.extra-form input{padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);min-width:0}
+.tag-x{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--over);font-weight:600}
+
+.panel{margin-block:16px 40px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.panel summary{cursor:pointer;padding:12px 14px;font-family:var(--f-display);font-weight:600;font-size:16px}
+.panel .in{padding:0 14px 14px;display:grid;gap:14px}
+.panel .blk{display:grid;gap:8px;max-width:68ch}
+.panel p{margin:0;color:var(--muted)}
+.chk{display:flex;gap:8px;align-items:flex-start;cursor:pointer}
+.chk input{margin-top:3px}
+.upd-list{display:grid;gap:2px;font-size:13px;max-height:220px;overflow:auto;width:100%}
+.upd-list div{display:flex;gap:10px}
+.upd-list .art{font-size:13px;flex:0 0 90px}
+.confirm{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px;border-radius:8px;background:var(--over-soft)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;font-size:14px;z-index:20;max-width:calc(100% - 32px)}
+
+.voice{display:flex;gap:8px;align-items:stretch}
+.mic{display:inline-flex;align-items:center;gap:8px;border:0;border-radius:8px;padding:0 16px;background:var(--accent);color:var(--accent-ink);font-weight:600;cursor:pointer;white-space:nowrap}
+.mic.live{background:var(--short);animation:pulse 1.2s infinite}
+.voice input{flex:1;min-width:0;font-size:16px;padding:10px 12px;border:1.5px dashed var(--accent);border-radius:8px;background:var(--accent-soft)}
+.voice input:focus{outline:none;border-style:solid;background:var(--surface)}
+.voice-hint{font-size:13px;color:var(--ink);background:var(--accent-soft);border-radius:8px;padding:8px 12px}
+.vopts{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;padding-top:12px;font-size:13px;color:var(--muted)}
+.vopts label{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+.vlog{margin-top:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden}
+.vl{display:grid;grid-template-columns:110px minmax(0,1fr) auto auto;gap:6px 12px;align-items:center;padding:8px 14px;border-top:1px solid var(--line)}
+.vl:first-child{border-top:0}
+.vl:first-child.ok{background:var(--accent-soft)}
+.vl .vn{min-width:0}
+.vl small{display:block;color:var(--muted);font-size:12px}
+.vl .vc{white-space:nowrap;font-size:13px}
+.vl .vu{font-size:12px;color:var(--muted);padding:4px 10px}
+.vl.err{grid-template-columns:minmax(0,1fr);background:var(--over-soft)}
+.vl.busy{grid-template-columns:minmax(0,1fr);color:var(--muted)}
+.vch{display:flex;flex-wrap:wrap;gap:6px}
+.vch .btn{font-size:13px;padding:5px 10px;white-space:normal;text-align:left}
+@media (max-width:720px){
+  .mic span{display:none}
+  .voice #cmdGo{display:none}
+  .vl{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"a c" "n n" "u u"}
+  .vl .art{grid-area:a}.vl .vc{grid-area:c}.vl .vn{grid-area:n}.vl .vu{grid-area:u;justify-self:start}
+  .vl.err .vn,.vl.busy .vn{grid-area:auto}
+
+  h1{font-size:19px}
+  .searchbox input{font-size:18px}
+  header.top .hint{display:none}
+  .toolbar select{width:100%}
+  .row.hdr{display:none}
+  .row{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"art diff" "name name" "book fact";gap:4px 10px;padding:10px 12px}
+  .art{grid-area:art}.name{grid-area:name}.book{grid-area:book;text-align:left;font-size:13px;color:var(--muted)}
+  .book::before{content:"Учёт: ";font-family:var(--f-body)}
+  .fact{grid-area:fact}.diff{grid-area:diff}
+  .diff .sum{display:inline;margin-left:6px}
+  .extra-form{grid-template-columns:1fr 1fr}
+  .extra-form .nm{grid-column:1/-1;order:-1}
+}
+</style>
+
+</head>
+<body>
+<style>
+/* voice-first additions */
+.listen{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;align-items:center}
+.bigmic{width:64px;height:64px;border-radius:50%;border:0;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;cursor:pointer;box-shadow:0 0 0 0 var(--accent)}
+.bigmic svg{width:30px;height:30px}
+.bigmic.on{background:var(--short);animation:ring 1.6s infinite}
+.bigmic.pause{background:var(--over)}
+@keyframes ring{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--short) 50%,transparent)}100%{box-shadow:0 0 0 18px transparent}}
+@media (prefers-reduced-motion:reduce){.bigmic.on{animation:none}}
+.caption{min-width:0;display:grid;gap:2px}
+.caption .st{font-weight:600}
+.caption .heard{font-family:var(--f-mono);color:var(--muted);font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:1.4em}
+.alert{display:none;border-radius:8px;padding:10px 14px;font-weight:600;align-items:center;gap:12px;flex-wrap:wrap}
+.alert.show{display:flex}
+.alert.bad{background:var(--short);color:#fff}
+.alert.good{background:var(--ok-soft);color:var(--ok)}
+.alert .art{font-weight:600}
+.typed{display:flex;gap:8px}
+.typed input{flex:1;min-width:0;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);font-size:15px}
+.vl.ign{grid-template-columns:minmax(0,1fr);color:var(--muted);background:transparent}
+.vl.ign small{display:inline;margin-left:6px}
+.login{max-width:380px;margin:12vh auto;display:grid;gap:12px;padding:24px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.login input{padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);font-size:16px}
+.login .err{color:var(--short);font-size:13px}
+.demo-banner{background:var(--over-soft);color:var(--ink);font-size:13px;padding:8px 12px;border-radius:8px}
+.empty-audit{padding:24px 14px;display:grid;gap:10px;justify-items:start}
+</style>
+
+<div id="loginView" class="wrap" hidden>
+  <form class="login" id="loginForm">
+    <h1>Ревизия запчастей</h1>
+    <p class="sub">Войдите учётной записью склада</p>
+    <input id="lgEmail" type="email" autocomplete="username" placeholder="Эл. почта" required>
+    <input id="lgPass" type="password" autocomplete="current-password" placeholder="Пароль" required>
+    <div class="err" id="lgErr"></div>
+    <button class="btn primary" type="submit">Войти</button>
+  </form>
+</div>
+
+<div id="appView" hidden>
+<header class="top">
+  <div class="wrap">
+    <div class="head-row">
+      <div>
+        <h1>Ревизия запчастей</h1>
+        <div class="sub" id="sub">Склад МСЦ</div>
+      </div>
+      <span class="sync" id="sync"><i></i><span>Подключение…</span></span>
+    </div>
+    <div class="progress">
+      <div class="bar" id="bar" aria-hidden="true"></div>
+      <div class="stats" id="stats"></div>
+    </div>
+    <div class="listen">
+      <button class="bigmic" id="micBtn" type="button" aria-label="Включить микрофон"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg></button>
+      <div class="caption">
+        <span class="st" id="micState">Нажмите микрофон, чтобы начать</span>
+        <span class="heard" id="heard">Говорите: «61 21 652 — три штуки», «нашли ещё пять», «отмена»</span>
+      </div>
+    </div>
+    <div class="alert" id="alert" role="status" aria-live="assertive"></div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="demoBanner" class="demo-banner" hidden style="margin-top:12px">Демо-режим: Supabase не настроен, данные хранятся только в этом браузере. Заполните SUPABASE_URL и SUPABASE_ANON_KEY в начале файла.</div>
+  <div class="vopts">
+    <label><input type="checkbox" id="speakAll"> Озвучивать каждую запись</label>
+    <label><input type="checkbox" id="speakBad" checked> Голосом сообщать о расхождении</label>
+    <label><input type="checkbox" id="useAI" checked> ИИ-разбор непонятных фраз</label>
+    <span id="aiState" class="hint"></span>
+  </div>
+  <section class="vlog" id="vlog" hidden aria-live="polite"></section>
+
+  <div class="toolbar">
+    <div class="typed" style="flex:1 1 280px">
+      <input id="q" type="search" autocomplete="off" spellcheck="false" placeholder="Поиск: артикул или название" aria-label="Поиск">
+    </div>
+    <div class="chips" id="chips" role="group" aria-label="Фильтр"></div>
+    <select id="cat" aria-label="Категория"><option value="">Все категории</option></select>
+    <button class="btn primary" id="exportBtn" type="button">Выгрузить в Excel</button>
+  </div>
+  <div class="list" id="list" role="list"></div>
+
+  <details class="panel" id="panel">
+    <summary>Ревизия и остатки</summary>
+    <div class="in">
+      <div class="blk"><strong id="auditTitle">—</strong><p id="auditInfo"></p></div>
+      <div class="blk">
+        <strong>Обновить остатки, не прерывая ревизию</strong>
+        <p>Выгрузите из 1С свежие остатки тем же отчётом и загрузите файл. Посчитанное сохранится, обновится «Учёт».</p>
+        <label class="chk"><input type="checkbox" id="adjFact" checked> Поправить факт посчитанных позиций на движение после подсчёта (списали 1 — факт уменьшится на 1)</label>
+        <div><input type="file" id="updFile" accept=".xlsx,.xls"></div>
+        <div id="updConfirm"></div>
+      </div>
+      <div class="blk">
+        <strong>Начать новую ревизию по файлу</strong>
+        <p>Excel-выгрузка остатков из 1С с колонками «Номенклатура», «Артикул», «Кол-во.», «Цена за единицу». Текущая ревизия закроется, её данные останутся в базе.</p>
+        <div><input type="file" id="file" accept=".xlsx,.xls"></div>
+        <div id="importConfirm"></div>
+      </div>
+      <div class="blk"><button class="btn" type="button" id="logoutBtn">Выйти</button></div>
+    </div>
+  </details>
+</main>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+/* ===== Настройки: заполните после создания проекта Supabase ===== */
+const CONFIG = {
+  SUPABASE_URL: 'https://ooqcljckethngqgrhkpt.supabase.co',        // например https://abcdxyz.supabase.co
+  SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9vcWNsamNrZXRobmdxZ3Joa3B0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI1Nzk4OTgsImV4cCI6MjEwODE1NTg5OH0.L0qSRi2gr9g4X2rRK3sWt8ENA9p7DX0tTJNeJ42j1Vk',   // Project Settings → API → anon public
+  AI_FUNCTION: 'parse-voice',
+  BRANCH: 'Алма-Ата'
+};
+/* ================================================================ */
+
+const $ = s => document.querySelector(s);
+const fmt = new Intl.NumberFormat('ru-RU', {maximumFractionDigits: 2});
+const money = v => fmt.format(Math.round(v)) + ' ₸';
+const fmtQ = v => fmt.format(v);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const compact = s => String(s).toLowerCase().replace(/ё/g,'е').replace(/[^0-9a-zа-я]/g,'');
+const lower = s => String(s).toLowerCase().replace(/ё/g,'е');
+const PAGE = 150;
+
+let items = [], byKey = new Map(), counts = new Map(), audit = null, me = {name: ''};
+let filter = 'all', catFilter = '', query = '', shown = PAGE;
+const rowEls = new Map();
+let toastT;
+function toast(m){ const t = $('#toast'); t.textContent = m; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 3000); }
+function setSync(cls, text){ const s = $('#sync'); s.className = 'sync ' + cls; s.querySelector('span').textContent = text; }
+function lsGet(k, d){ try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch(e) { return d; } }
+function lsSet(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e) {} }
+
+/* ---------- storage: Supabase or local demo ---------- */
+const LocalStore = {
+  mode: 'local',
+  async init(){ return {name: 'Демо'}; },
+  async currentAudit(){ return lsGet('rv-audit', null); },
+  async loadCounts(id){ return lsGet('rv-counts-' + id, {}); },
+  subscribe(){ setSync('local', 'Только в этом браузере'); },
+  async saveCount(id, art, rec){ const c = lsGet('rv-counts-' + id, {}); c[art] = rec; lsSet('rv-counts-' + id, c); },
+  async saveCounts(id, recs){ const c = lsGet('rv-counts-' + id, {}); for (const [a, r] of recs) c[a] = r; lsSet('rv-counts-' + id, c); },
+  async deleteCount(id, art){ const c = lsGet('rv-counts-' + id, {}); delete c[art]; lsSet('rv-counts-' + id, c); },
+  async logEvent(){},
+  async newAudit(title, stock, fname){ const a = {id: 'L' + Date.now(), title, created_at: new Date().toISOString(), stock, stock_ver: String(Date.now()), stock_at: new Date().toISOString(), stock_file: fname}; lsSet('rv-audit', a); return a; },
+  async updateStock(a, stock, fname){ const n = Object.assign({}, a, {stock, stock_ver: String(Date.now()), stock_at: new Date().toISOString(), stock_file: fname}); lsSet('rv-audit', n); return n; },
+  async ai(){ return null; },
+  async logout(){}
+};
+const SbStore = {
+  mode: 'cloud', sb: null, ch: null,
+  name(u){ return (u.user_metadata && (u.user_metadata.name || u.user_metadata.full_name)) || (u.email || '').split('@')[0]; },
+  async init(){
+    this.sb = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+    const {data: {session}} = await this.sb.auth.getSession();
+    return session ? {name: this.name(session.user)} : null;
+  },
+  async login(email, password){
+    const {data, error} = await this.sb.auth.signInWithPassword({email, password});
+    if (error) throw error;
+    return {name: this.name(data.user)};
+  },
+  async logout(){ await this.sb.auth.signOut(); },
+  async currentAudit(){
+    const {data, error} = await this.sb.from('audits').select('*').eq('active', true).order('created_at', {ascending: false}).limit(1);
+    if (error) throw error; return data[0] || null;
+  },
+  async loadCounts(id){
+    const {data, error} = await this.sb.from('counts').select('*').eq('audit_id', id).range(0, 9999);
+    if (error) throw error;
+    const o = {}; for (const r of data) o[r.art] = fromRow(r); return o;
+  },
+  subscribe(id, onCount, onAudit){
+    if (this.ch) this.sb.removeChannel(this.ch);
+    this.ch = this.sb.channel('audit-' + id)
+      .on('postgres_changes', {event: '*', schema: 'public', table: 'counts', filter: 'audit_id=eq.' + id}, p => onCount(p))
+      .on('postgres_changes', {event: 'DELETE', schema: 'public', table: 'counts'}, p => { if (p.old && p.old.audit_id === id) onCount(p); })
+      .on('postgres_changes', {event: '*', schema: 'public', table: 'audits'}, () => onAudit())
+      .subscribe(st => { if (st === 'SUBSCRIBED') setSync('on', 'Онлайн · общая база'); else if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') setSync('local', 'Нет связи — переподключаюсь'); });
+  },
+  row(id, art, r){ return {audit_id: id, art, q: r.q, b: r.b ?? null, adj: r.adj || 0, x: !!r.x, name: r.name || null, price: r.price || null, by_name: r.by || null, updated_at: new Date(r.t || Date.now()).toISOString()}; },
+  async saveCount(id, art, r){ const {error} = await this.sb.from('counts').upsert(this.row(id, art, r)); if (error) throw error; },
+  async saveCounts(id, recs){ if (!recs.length) return; const {error} = await this.sb.from('counts').upsert(recs.map(([a, r]) => this.row(id, a, r))); if (error) throw error; },
+  async deleteCount(id, art){ const {error} = await this.sb.from('counts').delete().eq('audit_id', id).eq('art', art); if (error) throw error; },
+  async logEvent(ev){ try { await this.sb.from('events').insert(ev); } catch(e) {} },
+  async newAudit(title, stock, fname){
+    await this.sb.from('audits').update({active: false}).eq('active', true);
+    const {data, error} = await this.sb.from('audits').insert({title, stock, stock_ver: String(Date.now()), stock_at: new Date().toISOString(), stock_file: fname, active: true}).select().single();
+    if (error) throw error; return data;
+  },
+  async updateStock(a, stock, fname){
+    const {data, error} = await this.sb.from('audits').update({stock, stock_ver: String(Date.now()), stock_at: new Date().toISOString(), stock_file: fname}).eq('id', a.id).select().single();
+    if (error) throw error; return data;
+  },
+  async ai(payload){
+    const {data, error} = await this.sb.functions.invoke(CONFIG.AI_FUNCTION, {body: payload});
+    if (error) throw error; return data;
+  }
+};
+function fromRow(r){ return {q: r.q == null ? null : +r.q, b: r.b == null ? null : +r.b, adj: +r.adj || 0, x: !!r.x, name: r.name, price: r.price == null ? 0 : +r.price, by: r.by_name, t: Date.parse(r.updated_at)}; }
+const store = CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY && window.supabase ? SbStore : LocalStore;
+
+/* ---------- stock & counts ---------- */
+function setStock(list){
+  items = list.map(r => ({key: r.art, art: r.art, name: r.name, cat: r.cat || '', book: +r.book || 0, price: +r.price || 0, extra: false, sArt: compact(r.art), sAll: lower(r.art + ' ' + r.name)}));
+  byKey = new Map(items.map(i => [i.key, i])); rowEls.clear();
+  const cats = [...new Set(items.map(i => i.cat).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
+  $('#cat').innerHTML = '<option value="">Все категории</option>' + cats.map(c => `<option>${esc(c)}</option>`).join('');
+  catFilter = '';
+}
+function syncExtras(){
+  items = items.filter(i => !i.extra);
+  for (const [k, it] of [...byKey]) if (it.extra) { byKey.delete(k); rowEls.delete(k); }
+  for (const [k, c] of counts) {
+    if (!c || !c.x || byKey.has(k)) continue;
+    const it = {key: k, art: k, name: c.name || '(без названия)', cat: '', book: 0, price: +c.price || 0, extra: true, sArt: compact(k), sAll: lower(k + ' ' + (c.name || ''))};
+    items.push(it); byKey.set(k, it);
+  }
+}
+function status(it){
+  const c = counts.get(it.key);
+  if (!c || c.q == null) return {st: 'none'};
+  const d = c.q - it.book;
+  return {st: d === 0 ? 'ok' : d < 0 ? 'short' : 'over', d, c};
+}
+
+/* ---------- render ---------- */
+function matches(it){
+  if (catFilter && it.cat !== catFilter) return false;
+  const s = status(it).st;
+  if (filter === 'todo' && s !== 'none') return false;
+  if (filter === 'done' && s === 'none') return false;
+  if (filter === 'diff' && !(s === 'short' || s === 'over')) return false;
+  if (filter === 'extra' && !it.extra) return false;
+  if (!query) return true;
+  const qc = compact(query);
+  if (qc && it.sArt.includes(qc)) return true;
+  return lower(query).split(/\s+/).filter(Boolean).every(t => it.sAll.includes(t));
+}
+function rank(it){ if (!query) return 0; const qc = compact(query); return it.sArt === qc ? 0 : it.sArt.startsWith(qc) ? 1 : it.sArt.includes(qc) ? 2 : 3; }
+function renderStats(){
+  let total = 0, done = 0, ok = 0, sh = 0, ov = 0, shSum = 0, ovSum = 0, ex = 0;
+  for (const it of items) {
+    if (it.extra) ex++; else total++;
+    const s = status(it); if (s.st === 'none') continue;
+    if (!it.extra) done++;
+    if (s.st === 'ok') ok++;
+    if (s.st === 'short') { sh++; shSum += -s.d * it.price; }
+    if (s.st === 'over') { ov++; ovSum += s.d * it.price; }
+  }
+  const pct = v => total ? v / total * 100 : 0;
+  $('#bar').innerHTML = `<span class="b-ok" style="width:${pct(ok)}%"></span><span class="b-short" style="width:${pct(sh)}%"></span><span class="b-over" style="width:${pct(Math.max(0, done - ok - sh))}%"></span>`;
+  $('#stats').innerHTML = `<span>Посчитано <b class="num">${done}</b> из <b class="num">${total}</b> (${Math.floor(pct(done))}%)</span><span>Совпадает <b class="num">${ok}</b></span>` +
+    `<span class="s-short">Недостача <b class="num">${sh}</b> поз. · <b class="num">${money(shSum)}</b></span><span class="s-over">Излишек <b class="num">${ov}</b> поз. · <b class="num">${money(ovSum)}</b></span>` + (ex ? `<span>Сверх учёта <b class="num">${ex}</b></span>` : '');
+  const cnt = {all: total + ex, todo: total - done, done: done + ex, diff: sh + ov, extra: ex};
+  $('#chips').innerHTML = [['all','Все'],['todo','Не посчитано'],['done','Посчитано'],['diff','Расхождения'],['extra','Сверх учёта']]
+    .map(([k, l]) => `<button type="button" class="chip" data-f="${k}" aria-pressed="${filter === k}">${l}<span class="c">${cnt[k]}</span></button>`).join('');
+}
+function buildRow(it){
+  const el = document.createElement('div'); el.className = 'row'; el.setAttribute('role', 'listitem'); el.dataset.key = it.key;
+  el.innerHTML = `<div class="art"></div><div class="name"><span class="n"></span><span class="meta"></span></div><div class="book"></div>
+    <div class="fact"><input type="text" inputmode="decimal" autocomplete="off" aria-label="Фактическое количество"><button class="x" type="button" aria-label="Сбросить подсчёт" title="Сбросить подсчёт">×</button></div><div class="diff"></div>`;
+  rowEls.set(it.key, el); updateRow(it); return el;
+}
+function updateRow(it){
+  const el = rowEls.get(it.key); if (!el) return;
+  const s = status(it), c = s.c;
+  el.querySelector('.art').textContent = it.art;
+  el.querySelector('.n').textContent = it.name;
+  const when = c && c.t ? new Date(c.t).toLocaleString('ru-RU', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'}) : '';
+  el.querySelector('.meta').innerHTML = (it.extra ? '<span class="tag-x">Сверх учёта</span>' : esc(it.cat)) +
+    (c ? ' · посчитано ' + esc([c.by, when].filter(Boolean).join(' · ')) : '') +
+    (c && c.adj ? ` · после подсчёта ${c.adj > 0 ? '+' : '−'}${fmtQ(Math.abs(c.adj))} по 1С` : '') + (it.price ? ' · ' + esc(fmt.format(it.price)) + ' ₸/шт' : '');
+  el.querySelector('.book').textContent = fmtQ(it.book);
+  const inp = el.querySelector('input');
+  if (document.activeElement !== inp) inp.value = c && c.q != null ? String(c.q) : '';
+  inp.classList.toggle('counted', s.st !== 'none');
+  el.querySelector('.x').hidden = s.st === 'none';
+  const d = el.querySelector('.diff');
+  if (s.st === 'none') d.innerHTML = '<span class="pill none">—</span>';
+  else if (s.st === 'ok') d.innerHTML = '<span class="pill ok">✓ сходится</span>';
+  else d.innerHTML = `<span class="pill ${s.st}">${s.d > 0 ? '+' : '−'}${fmtQ(Math.abs(s.d))}</span>` + (it.price ? `<span class="sum">${s.d > 0 ? '+' : '−'}${money(Math.abs(s.d * it.price))}</span>` : '');
+}
+function renderList(){
+  const rows = items.filter(matches); if (query) rows.sort((a, b) => rank(a) - rank(b));
+  const frag = document.createDocumentFragment();
+  const hdr = document.createElement('div'); hdr.className = 'row hdr';
+  hdr.innerHTML = '<div>Артикул</div><div>Наименование</div><div class="r">Учёт</div><div class="r">Факт</div><div class="r">Разница</div>';
+  frag.appendChild(hdr);
+  for (const it of rows.slice(0, shown)) frag.appendChild(rowEls.get(it.key) || buildRow(it));
+  if (rows.length > shown) { const m = document.createElement('div'); m.className = 'more'; m.innerHTML = `<button class="btn" type="button" id="moreBtn">Показать ещё (${rows.length - shown})</button>`; frag.appendChild(m); }
+  if (!items.length) { const e = document.createElement('div'); e.className = 'empty-audit'; e.innerHTML = '<b>Ревизия ещё не начата.</b><span>Загрузите выгрузку остатков из 1С в разделе «Ревизия и остатки» ниже.</span>'; frag.appendChild(e); $('#panel').open = true; }
+  else if (!rows.length) { const e = document.createElement('div'); e.className = 'empty'; e.textContent = 'Ничего не найдено по текущему фильтру.'; frag.appendChild(e); }
+  $('#list').replaceChildren(frag);
+}
+function renderAll(){ renderStats(); for (const it of items) updateRow(it); renderList(); renderAuditInfo(); }
+function renderAuditInfo(){
+  if (!audit) { $('#auditTitle').textContent = 'Нет активной ревизии'; $('#auditInfo').textContent = ''; return; }
+  $('#auditTitle').textContent = audit.title || 'Ревизия';
+  const d = new Date(audit.created_at).toLocaleString('ru-RU', {day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit'});
+  const sd = audit.stock_at ? new Date(audit.stock_at).toLocaleString('ru-RU', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'}) : '';
+  $('#auditInfo').textContent = `Начата ${d}. Позиций: ${items.filter(i => !i.extra).length}.` + (sd ? ` Остатки от ${sd}${audit.stock_file ? ' («' + audit.stock_file + '»)' : ''}.` : '');
+  $('#sub').textContent = `${audit.title || 'Ревизия'} · ${CONFIG.BRANCH}` + (me.name ? ' · ' + me.name : '');
+}
+
+/* ---------- writing counts ---------- */
+let writeChain = Promise.resolve();
+function persist(art, rec){
+  if (rec) counts.set(art, rec); else counts.delete(art);
+  if (!audit) return;
+  const id = audit.id;
+  writeChain = writeChain.then(() => rec ? store.saveCount(id, art, rec) : store.deleteCount(id, art))
+    .catch(e => { toast('Не сохранилось: ' + (e.message || e)); setSync('local', 'Ошибка записи'); });
+}
+function setCount(it, q, extra){
+  const cur = counts.get(it.key);
+  const rec = Object.assign({}, extra || {}, {q, b: it.book, adj: cur && cur.adj || 0, by: me.name, t: Date.now()});
+  if (it.extra) Object.assign(rec, {x: true, name: it.name, b: 0});
+  persist(it.key, rec);
+  updateRow(it); renderStats();
+  const el = rowEls.get(it.key); if (el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+}
+function commitTyped(it, raw){
+  raw = String(raw).trim().replace(',', '.').replace(/\s/g, '');
+  if (raw === '') return false;
+  const cur = counts.get(it.key); let q;
+  if (/^[+-]\d+(\.\d+)?$/.test(raw) && cur && cur.q != null) q = cur.q + parseFloat(raw); else q = parseFloat(raw.replace(/^\+/, ''));
+  if (!isFinite(q) || q < 0) { toast('Введите число, например 3 или +2'); return false; }
+  q = Math.round(q * 1000) / 1000;
+  if (cur && cur.q === q) return true;
+  const prev = cur ? cur.q : null;
+  setCount(it, q);
+  store.logEvent({audit_id: audit.id, art: it.art, mode: 'set', n: q, prev, q, text: 'вручную', source: 'manual', by_name: me.name});
+  return true;
+}
+
+/* ---------- voice: parsing ---------- */
+const NUM = {ноль:[0,1],нуль:[0,1],один:[1,1],одна:[1,1],одну:[1,1],одной:[1,1],два:[2,1],две:[2,1],три:[3,1],четыре:[4,1],пять:[5,1],шесть:[6,1],семь:[7,1],восемь:[8,1],девять:[9,1],
+  десять:[10,1.5],одиннадцать:[11,1.5],двенадцать:[12,1.5],тринадцать:[13,1.5],четырнадцать:[14,1.5],пятнадцать:[15,1.5],шестнадцать:[16,1.5],семнадцать:[17,1.5],восемнадцать:[18,1.5],девятнадцать:[19,1.5],
+  двадцать:[20,2],тридцать:[30,2],сорок:[40,2],пятьдесят:[50,2],шестьдесят:[60,2],семьдесят:[70,2],восемьдесят:[80,2],девяносто:[90,2],
+  сто:[100,3],двести:[200,3],триста:[300,3],четыреста:[400,3],пятьсот:[500,3],шестьсот:[600,3],семьсот:[700,3],восемьсот:[800,3],девятьсот:[900,3]};
+let artMap = new Map(), lastItem = null, lastAt = 0;
+const rebuildArtMap = () => { artMap = new Map(); for (const it of items) if (!it.extra) artMap.set(it.art, it); };
+
+function tokenize(text){
+  let s = ' ' + lower(text) + ' ';
+  s = s.replace(/косая черта|косая|дробь|слэш|слеш/g, ' / ')
+       .replace(/(\d)\s*[\\\/|.\-]\s*(?=\d)/g, '$1/').replace(/(\d)\s+\/\s*(?=\d)/g, '$1/').replace(/(\d)\/\s+(?=\d)/g, '$1/')
+       .replace(/\+/g, ' плюс ').replace(/(^|\s)-(?=\s*\d)/g, ' минус ').replace(/[,;:!?«»"()]/g, ' ');
+  const out = []; let acc = null, place = 9;
+  const flush = () => { if (acc != null) out.push({k: 'n', v: String(acc)}); acc = null; place = 9; };
+  for (let w of s.split(/\s+/).filter(Boolean)) {
+    w = w.replace(/\.$/, '');
+    if (/^\d+(\/\d+)+$/.test(w)) { flush(); out.push({k: 'a', v: w}); continue; }
+    if (/^\d+$/.test(w)) { flush(); out.push({k: 'n', v: w}); continue; }
+    if (w === '/') continue;
+    const n = NUM[w];
+    if (n) { const [v, p] = n, chk = p === 1.5 ? 2 : p;
+      if (acc != null && chk < place && place !== 1.5) { acc += v; place = p === 1.5 ? 1 : p; } else { flush(); acc = v; place = p === 1.5 ? 1 : p; }
+      continue; }
+    flush(); out.push({k: 'w', v: w});
+  }
+  flush(); return out;
+}
+function findArt(parts){
+  parts = parts.map(p => String(+p)); const a = parts.join('/');
+  if (artMap.has(a)) return artMap.get(a);
+  if (parts.length === 2 && artMap.has('61/' + a)) return artMap.get('61/' + a);
+  return null;
+}
+function tryArtAt(toks, i){
+  const t = toks[i];
+  if (t.k === 'a') { const p = t.v.split('/'); const it = findArt(p.slice(0, 3)) || (p.length === 2 ? findArt(p) : null); return it ? {it, len: 1, rest: p.length === 4 ? +p[3] : null} : {bad: true, len: 1, v: t.v}; }
+  if (t.k !== 'n') return null;
+  const run = []; for (let j = i; j < toks.length && toks[j].k === 'n' && run.length < 3; j++) run.push(toks[j].v);
+  for (const L of [3, 2]) if (run.length >= L) { const it = findArt(run.slice(0, L)); if (it) return {it, len: L}; }
+  if (t.v.length >= 5) {
+    const hits = items.filter(x => !x.extra && t.v.startsWith(x.sArt));
+    const exact = hits.find(x => x.sArt === t.v); if (exact) return {it: exact, len: 1};
+    if (hits.length === 1) return {it: hits[0], len: 1, rest: +t.v.slice(hits[0].sArt.length)};
+    if (hits.length > 1) return {amb: hits.slice(0, 4), len: 1};
+  }
+  return null;
+}
+function modeOf(words){
+  const w = words.join(' ');
+  if (/(^|\s)(ещ|плюс|добав|прибав|дополн|докин)/.test(w)) return 'add';
+  if (/(^|\s)(минус|убер|убра|отним|убав|спиш)/.test(w)) return 'sub';
+  return 'set';
+}
+const QTY_WORD = /^(шт|штук|штуки|штука|штучк|единиц|комплект)/;
+function parseLocal(text){
+  const toks = tokenize(text), cmds = [];
+  let cur = {words: [], nums: []};
+  const done = () => { if (cur.it || cur.nums.length || cur.amb || cur.bad) cmds.push(cur); cur = {words: [], nums: []}; };
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i];
+    if (t.k === 'w') { cur.words.push(t.v); continue; }
+    const hit = tryArtAt(toks, i);
+    if (hit && (hit.it || hit.amb || hit.bad)) {
+      if (cur.it || cur.amb || cur.bad) done();
+      if (hit.it) cur.it = hit.it; else if (hit.amb) cur.amb = hit.amb; else cur.bad = hit.v;
+      if (hit.rest != null) cur.qty = hit.rest; else if (cur.nums.length) cur.qty = +cur.nums.pop();
+      i += hit.len - 1; continue;
+    }
+    if ((cur.it || cur.amb) && cur.qty == null) cur.qty = +t.v; else cur.nums.push(t.v);
+  }
+  done();
+  for (const c of cmds) {
+    c.mode = modeOf(c.words);
+    if (c.qty == null && c.mode === 'set' && c.words.some(w => /^(нет|отсутств|ноль|нисколько)/.test(w))) c.qty = 0;
+    // "нашли ещё 5 штук" without an article: only right after a recorded position and only with a clear cue
+    if (!c.it && !c.amb && !c.bad && c.nums.length === 1 && lastItem && c.mode !== 'set' && Date.now() - lastAt < 120000 && c.words.length <= 5)
+      { c.it = lastItem; c.qty = +c.nums[0]; c.nums = []; c.viaLast = true; }
+    c.ok = !!(c.it && c.qty != null && isFinite(c.qty) && !c.nums.length);
+  }
+  return cmds;
+}
+function looksRelevant(text){
+  const t = tokenize(text);
+  const nums = t.filter(x => x.k !== 'w').length;
+  const cue = t.some(x => x.k === 'w' && /^(шт|штук|артикул|ещ|плюс|минус|нашли|добав|нет|позици|ротор|статор|якор|щетк|плат|дисплей|автомат|подшипник|шестерн|кнопк|выключател|корпус|вал|блок|реле|кабел|шнур|ремен|фильтр|карбюратор|свеч|цилиндр|поршен)/.test(x.v));
+  return nums >= 2 || (nums >= 1 && cue);
+}
+function candidatesFor(text){
+  const toks = tokenize(text);
+  const nums = toks.filter(t => t.k !== 'w').flatMap(t => t.v.split('/')).filter(v => v.length >= 2);
+  const words = toks.filter(t => t.k === 'w' && t.v.length >= 3 && !/^(шт|штук|ещ|плюс|минус|нашли|добав|количество|артикул|позиция|так|вот|это|там)/.test(t.v)).map(w => w.v.slice(0, Math.max(3, w.v.length - 2)));
+  const scored = [];
+  for (const it of items) {
+    if (it.extra) continue;
+    const parts = it.art.split('/'); let s = 0;
+    for (const n of nums) { if (parts.includes(String(+n))) s += 3; else if (it.sArt.includes(n)) s += 1; }
+    for (const w of words) if (it.sAll.includes(w)) s += 2;
+    if (s) scored.push([s, it]);
+  }
+  scored.sort((a, b) => b[0] - a[0]);
+  const out = scored.slice(0, 25).map(x => x[1]);
+  if (lastItem && !out.includes(lastItem)) out.push(lastItem);
+  return out;
+}
+
+/* ---------- voice: applying and feedback ---------- */
+let voiceLog = [];
+function applyCmd(it, mode, n, text, source){
+  const cur = counts.get(it.key), prev = cur && cur.q != null ? cur.q : null;
+  let q = mode === 'add' ? (prev || 0) + n : mode === 'sub' ? Math.max(0, (prev || 0) - n) : n;
+  q = Math.round(q * 1000) / 1000;
+  setCount(it, q);
+  lastItem = it; lastAt = Date.now();
+  store.logEvent({audit_id: audit.id, art: it.art, mode, n, prev, q, text, source, by_name: me.name});
+  addLog({kind: 'ok', it, prev, q, mode, n, text, source});
+  query = it.art; $('#q').value = it.art; renderList();
+  signal(it, q, mode, n);
+}
+function signal(it, q, mode, n){
+  const d = q - it.book, short = it.name.split(/[\s,(]+/).slice(0, 3).join(' ');
+  const box = $('#alert');
+  if (d === 0) {
+    beep('ok');
+    box.className = 'alert good show';
+    box.innerHTML = `<span class="art">${esc(it.art)}</span><span>✓ сходится: ${fmtQ(q)} шт.</span>`;
+    if ($('#speakAll').checked) speak(`${short}. ${mode === 'add' ? 'Плюс ' + fmtQ(n) + '. ' : ''}${fmtQ(q)}, сходится`);
+  } else {
+    beep('bad');
+    box.className = 'alert bad show';
+    box.innerHTML = `<span class="art">${esc(it.art)}</span><span>НЕ БЬЁТСЯ: по учёту ${fmtQ(it.book)}, посчитано ${fmtQ(q)} (${d > 0 ? '+' : '−'}${fmtQ(Math.abs(d))})</span>`;
+    if ($('#speakBad').checked || $('#speakAll').checked) speak(`Не бьётся. ${short}. По учёту ${fmtQ(it.book)}, посчитано ${fmtQ(q)}.` + (d < 0 ? ' Если есть ещё, скажите: ещё.' : ''));
+  }
+  clearTimeout(signal.t); signal.t = setTimeout(() => box.classList.remove('show'), d === 0 ? 4000 : 12000);
+}
+let actx = null;
+function beep(kind){
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const tones = kind === 'ok' ? [[880, 0, .09], [1320, .11, .12]] : [[260, 0, .22], [200, .28, .22], [260, .56, .22]];
+    for (const [f, at, dur] of tones) {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = kind === 'ok' ? 'sine' : 'square'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, actx.currentTime + at);
+      g.gain.exponentialRampToValueAtTime(kind === 'ok' ? .25 : .18, actx.currentTime + at + .01);
+      g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + at + dur);
+      o.connect(g).connect(actx.destination); o.start(actx.currentTime + at); o.stop(actx.currentTime + at + dur + .02);
+    }
+  } catch(e) {}
+}
+function addLog(e){ e.id = Math.random().toString(36).slice(2); voiceLog.unshift(e); voiceLog = voiceLog.slice(0, 12); renderLog(); }
+function renderLog(){
+  const box = $('#vlog'); box.hidden = !voiceLog.length;
+  box.innerHTML = voiceLog.map(e => {
+    if (e.kind === 'ok') {
+      const d = e.q - e.it.book, cls = d === 0 ? 'ok' : d < 0 ? 'short' : 'over';
+      const ch = e.mode === 'set' ? (e.prev == null ? `факт ${fmtQ(e.q)}` : `было ${fmtQ(e.prev)} → ${fmtQ(e.q)}`) : `${e.mode === 'add' ? '+' : '−'}${fmtQ(e.n)} → итого ${fmtQ(e.q)}`;
+      return `<div class="vl ok"><span class="art">${esc(e.it.art)}</span><span class="vn">${esc(e.it.name)}<small>«${esc(e.text)}»${e.source === 'ai' ? ' · разобрал ИИ' : ''}</small></span>
+        <span class="vc num">${ch} <span class="pill ${cls}">${d === 0 ? '✓' : (d > 0 ? '+' : '−') + fmtQ(Math.abs(d))}</span></span>
+        ${e.undone ? '<span class="vu">отменено</span>' : `<button class="btn vu" type="button" data-undo="${e.id}">Отменить</button>`}</div>`;
+    }
+    if (e.kind === 'busy') return `<div class="vl busy"><span class="vn">Разбираю: «${esc(e.text)}»…</span></div>`;
+    if (e.kind === 'ign') return `<div class="vl ign"><span class="vn">Пропущено как не относящееся к ревизии<small>«${esc(e.text)}»</small></span></div>`;
+    const ch = (e.choices || []).map((it, i) => `<button class="btn" type="button" data-pick="${e.id}:${i}">${esc(it.art)} · ${esc(it.name.slice(0, 40))}</button>`).join('');
+    return `<div class="vl err"><span class="vn">${esc(e.msg)}<small>«${esc(e.text)}»</small></span>${ch ? '<span class="vch">' + ch + '</span>' : ''}</div>`;
+  }).join('');
+}
+function undo(e){
+  if (!e || e.undone) return false;
+  const rec = e.prev == null ? null : Object.assign({}, counts.get(e.it.key), {q: e.prev, t: Date.now(), by: me.name});
+  persist(e.it.key, rec);
+  store.logEvent({audit_id: audit.id, art: e.it.art, mode: 'undo', n: null, prev: e.q, q: e.prev, text: 'отмена', source: 'voice', by_name: me.name});
+  e.undone = true; updateRow(e.it); renderStats(); renderLog(); return true;
+}
+$('#vlog').addEventListener('click', ev => {
+  const u = ev.target.closest('[data-undo]');
+  if (u) { undo(voiceLog.find(x => x.id === u.dataset.undo)); return; }
+  const p = ev.target.closest('[data-pick]');
+  if (p) {
+    const [id, i] = p.dataset.pick.split(':'); const e = voiceLog.find(x => x.id === id); if (!e) return;
+    voiceLog = voiceLog.filter(x => x !== e); const it = e.choices[+i];
+    if (e.qty != null) applyCmd(it, e.mode || 'set', e.qty, e.text, 'pick');
+    else { renderLog(); query = it.art; $('#q').value = it.art; renderList(); const inp = rowEls.get(it.key)?.querySelector('input'); if (inp) { inp.focus(); inp.select(); } }
+  }
+});
+
+let recentTexts = [];
+let handling = Promise.resolve();
+function handleText(text, alts){
+  text = String(text || '').trim(); if (!text) return;
+  handling = handling.then(() => handleOne(text, alts || [])).catch(e => console.error(e));
+}
+async function handleOne(text, alts){
+  if (!audit || !items.length) return;
+  rebuildArtMap();
+  if (/^(отмена|отмени|отменить|отменяй|назад)(?=$|[\s.,!])/.test(lower(text).trim())) {
+    const e = voiceLog.find(x => x.kind === 'ok' && !x.undone);
+    if (undo(e)) { speak('Отменено'); } return;
+  }
+  // try the main transcript and recognizer alternatives with the local parser first
+  let best = null;
+  for (const t of [text, ...alts]) { const c = parseLocal(t); if (c.length && c.every(x => x.ok)) { best = {t, c}; break; } }
+  if (best) { for (const c of best.c) applyCmd(c.it, c.mode, c.qty, text, 'voice'); recentTexts.push(text); recentTexts = recentTexts.slice(-3); return; }
+  // unclear: only bother the AI if the phrase looks like it is about parts
+  if (!looksRelevant(text) && !alts.some(looksRelevant)) { if (text.split(/\s+/).length >= 2) addLog({kind: 'ign', text}); return; }
+  const local = parseLocal(text);
+  if ($('#useAI').checked && store.mode === 'cloud') {
+    const busy = {kind: 'busy', text}; addLog(busy);
+    const cands = candidatesFor([text, ...alts].join(' '));
+    let r = null, err = null;
+    try {
+      r = await store.ai({text, alternatives: alts, context: recentTexts,
+        last: lastItem ? {art: lastItem.art, name: lastItem.name} : null,
+        candidates: cands.map(it => { const c = counts.get(it.key); return {art: it.art, name: it.name, book: it.book, counted: c && c.q != null ? c.q : null}; })});
+    } catch(e) { err = e; }
+    voiceLog = voiceLog.filter(x => x !== busy); renderLog();
+    if (r && r.ignore) { addLog({kind: 'ign', text}); return; }
+    const cmds = (r && Array.isArray(r.commands) ? r.commands : []).map(c => ({it: artMap.get(String(c.art).trim()), qty: +c.qty, mode: ['set','add','sub'].includes(c.mode) ? c.mode : 'set'})).filter(c => c.it && isFinite(c.qty) && c.qty >= 0);
+    if (cmds.length) { for (const c of cmds) applyCmd(c.it, c.mode, c.qty, text, 'ai'); recentTexts.push(text); recentTexts = recentTexts.slice(-3); return; }
+    const choices = local.find(c => c.amb)?.amb || cands.slice(0, 4);
+    const q1 = local.find(c => c.qty != null);
+    addLog({kind: 'err', msg: (r && r.question) || (err ? 'ИИ-помощник не ответил. Повторите или выберите:' : 'Не понял, какой артикул. Повторите или выберите:'), text, choices, qty: q1 ? q1.qty : null, mode: q1 ? q1.mode : 'set'});
+    beep('bad'); speak((r && r.question) || 'Не понял, повторите');
+    return;
+  }
+  const choices = local.find(c => c.amb)?.amb || candidatesFor(text).slice(0, 4);
+  const q1 = local.find(c => c.qty != null);
+  addLog({kind: 'err', msg: local.some(c => c.it && c.qty == null) ? 'Не услышал количество — повторите с числом' : 'Не понял, какой артикул. Повторите или выберите:', text, choices, qty: q1 ? q1.qty : null, mode: q1 ? q1.mode : 'set'});
+  speak('Не понял, повторите');
+}
+
+/* ---------- voice: continuous listening ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, listening = false, speaking = false, wake = null, restartT;
+function micUI(state, text){
+  const b = $('#micBtn'); b.classList.toggle('on', state === 'on'); b.classList.toggle('pause', state === 'pause');
+  b.setAttribute('aria-label', state === 'off' ? 'Включить микрофон' : 'Выключить микрофон');
+  $('#micState').textContent = text;
+}
+function startRec(){
+  if (!listening || speaking) return;
+  try { rec.start(); } catch(e) {}
+}
+function makeRec(){
+  rec = new SR(); rec.lang = 'ru-RU'; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 3;
+  rec.onstart = () => micUI('on', 'Слушаю… называйте артикул и количество');
+  rec.onresult = ev => {
+    let interim = '';
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      const r = ev.results[i];
+      if (r.isFinal) {
+        if (speaking) continue;
+        const alts = []; for (let k = 1; k < r.length; k++) alts.push(r[k].transcript);
+        $('#heard').textContent = r[0].transcript;
+        handleText(r[0].transcript, alts);
+      } else interim += r[0].transcript;
+    }
+    if (interim && !speaking) $('#heard').textContent = interim + '…';
+  };
+  rec.onerror = ev => {
+    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') { stopListening(); toast('Нет доступа к микрофону. Разрешите микрофон для этого сайта в настройках браузера.'); }
+    else if (ev.error === 'audio-capture') { stopListening(); toast('Микрофон не найден'); }
+  };
+  rec.onend = () => { clearTimeout(restartT); if (listening && !speaking) restartT = setTimeout(startRec, 200); else if (!listening) micUI('off', 'Микрофон выключен'); };
+}
+async function startListening(){
+  if (!SR) { toast('Этот браузер не умеет распознавать речь. Откройте страницу в Google Chrome.'); return; }
+  if (!audit || !items.length) { toast('Сначала загрузите остатки и начните ревизию'); $('#panel').open = true; return; }
+  try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch(e) {}
+  listening = true; if (!rec) makeRec();
+  micUI('on', 'Включаю микрофон…'); startRec();
+  try { wake = await navigator.wakeLock.request('screen'); } catch(e) {}
+}
+function stopListening(){
+  listening = false; clearTimeout(restartT);
+  try { rec && rec.abort(); } catch(e) {}
+  micUI('off', 'Микрофон выключен');
+  try { wake && wake.release(); } catch(e) {} wake = null;
+}
+$('#micBtn').addEventListener('click', () => listening ? stopListening() : startListening());
+document.addEventListener('visibilitychange', async () => { if (document.visibilityState === 'visible' && listening) { try { wake = await navigator.wakeLock.request('screen'); } catch(e) {} startRec(); } });
+
+/* speaking pauses the microphone so the phone does not hear itself */
+function speak(t){
+  if (!window.speechSynthesis) return;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(t); u.lang = 'ru-RU'; u.rate = 1.15;
+    speaking = true; if (listening) { micUI('pause', 'Говорю…'); try { rec.abort(); } catch(e) {} }
+    const resume = () => { if (!speaking) return; speaking = false; if (listening) { micUI('on', 'Слушаю…'); setTimeout(startRec, 250); } };
+    u.onend = resume; u.onerror = resume; setTimeout(resume, 9000);
+    speechSynthesis.speak(u);
+  } catch(e) { speaking = false; }
+}
+
+/* ---------- audit loading and sync ---------- */
+async function loadAudit(){
+  audit = await store.currentAudit();
+  counts = new Map();
+  if (!audit) { setStock([]); renderAll(); return; }
+  setStock(audit.stock || []);
+  const c = await store.loadCounts(audit.id);
+  counts = new Map(Object.entries(c)); syncExtras();
+  shown = PAGE; renderAll();
+  store.subscribe(audit.id, onRemoteCount, onRemoteAudit);
+}
+function onRemoteCount(p){
+  if (p.eventType === 'DELETE') counts.delete(p.old.art);
+  else { const r = p.new; const loc = counts.get(r.art); const inc = fromRow(r); if (!loc || !(loc.t > inc.t)) counts.set(r.art, inc); }
+  const had = byKey.has(p.eventType === 'DELETE' ? p.old.art : p.new.art);
+  syncExtras();
+  const it = byKey.get(p.eventType === 'DELETE' ? p.old.art : p.new.art);
+  if (it && had) { updateRow(it); renderStats(); } else renderAll();
+}
+let auditT;
+function onRemoteAudit(){
+  clearTimeout(auditT);
+  auditT = setTimeout(async () => {
+    const a = await store.currentAudit().catch(() => null);
+    if (!a) return;
+    if (!audit || a.id !== audit.id) { toast('Начата новая ревизия'); await loadAudit(); return; }
+    if (a.stock_ver !== audit.stock_ver) { audit = a; setStock(a.stock || []); syncExtras(); renderAll(); toast('Остатки обновлены'); }
+  }, 400);
+}
+
+/* ---------- Excel import / update / export ---------- */
+function parseNum(v){ if (typeof v === 'number') return v; return parseFloat(String(v ?? '').replace(/\s/g, '').replace(',', '.')) || 0; }
+function parseSheet(buf){
+  const wb = XLSX.read(buf, {type: 'array'});
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header: 1, raw: true, defval: ''});
+  const hi = rows.findIndex(r => r.some(c => String(c).trim().toLowerCase() === 'артикул'));
+  if (hi < 0) throw new Error('Не найдена колонка «Артикул»');
+  const h = rows[hi].map(c => String(c).trim().toLowerCase());
+  const col = (...n) => h.findIndex(x => n.some(y => x.startsWith(y)));
+  const cA = col('артикул'), cN = col('номенклатура', 'наименование'), cQ = col('кол'), cP = col('цена'), cC = col('категория', 'группа');
+  const out = [];
+  for (const r of rows.slice(hi + 1)) {
+    const art = String(r[cA] ?? '').trim(); if (!art || /^итог/i.test(art)) continue;
+    out.push({art, name: String(r[cN] ?? '').trim(), cat: cC >= 0 ? String(r[cC] ?? '').trim() : '', book: parseNum(r[cQ]), price: cP >= 0 ? Math.round(parseNum(r[cP]) * 100) / 100 : 0});
+  }
+  return out;
+}
+$('#file').addEventListener('change', async e => {
+  const f = e.target.files[0]; if (!f) return; const box = $('#importConfirm');
+  try {
+    const list = parseSheet(await f.arrayBuffer()); if (!list.length) throw new Error('В файле нет строк с артикулами');
+    const qty = list.reduce((s, r) => s + r.book, 0), sum = list.reduce((s, r) => s + r.book * r.price, 0);
+    box.innerHTML = `<div class="confirm"><span>${esc(f.name)}: <b class="num">${list.length}</b> позиций, <b class="num">${fmtQ(qty)}</b> шт., <b class="num">${money(sum)}</b>.</span><button class="btn primary" type="button" id="impGo">Начать ревизию по этому файлу</button><button class="btn" type="button" id="impNo">Отмена</button></div>`;
+    $('#impNo').onclick = () => { box.innerHTML = ''; e.target.value = ''; };
+    $('#impGo').onclick = async () => {
+      $('#impGo').disabled = true;
+      try { await store.newAudit(`Ревизия от ${new Date().toLocaleDateString('ru-RU')}`, list, f.name); await loadAudit(); box.innerHTML = ''; e.target.value = ''; $('#panel').open = false; toast('Ревизия начата. Включайте микрофон.'); }
+      catch(err) { toast('Не удалось: ' + (err.message || err)); $('#impGo').disabled = false; }
+    };
+  } catch(err) { box.innerHTML = `<div class="confirm">Не получилось прочитать файл: ${esc(err.message)}</div>`; }
+});
+$('#updFile').addEventListener('change', async e => {
+  const f = e.target.files[0]; if (!f) return; const box = $('#updConfirm');
+  if (!audit) { toast('Нет активной ревизии'); return; }
+  try {
+    const list = parseSheet(await f.arrayBuffer()); if (!list.length) throw new Error('В файле нет строк с артикулами');
+    const newMap = new Map(list.map(r => [r.art, r])), changes = [];
+    for (const it of items) { if (it.extra) continue; const r = newMap.get(it.art), nb = r ? r.book : 0; if (nb !== it.book) changes.push({key: it.key, art: it.art, name: it.name, ob: it.book, nb}); }
+    const added = list.filter(r => !byKey.has(r.art) || byKey.get(r.art).extra).length;
+    const merged = list.slice();
+    for (const it of items) if (!it.extra && !newMap.has(it.art) && counts.get(it.key)) merged.push({art: it.art, name: it.name, cat: it.cat, book: 0, price: it.price});
+    const counted = changes.filter(c => { const x = counts.get(c.key); return x && x.q != null && !x.x; });
+    const adj = $('#adjFact').checked;
+    const lines = counted.slice(0, 50).map(c => { const x = counts.get(c.key), d = c.nb - (x.b != null ? x.b : c.ob);
+      return `<div><span class="art">${esc(c.art)}</span><span>${esc(c.name.slice(0, 50))} — учёт ${fmtQ(c.ob)} → ${fmtQ(c.nb)}${adj && d ? `, факт ${fmtQ(x.q)} → ${fmtQ(Math.max(0, x.q + d))}` : ''}</span></div>`; }).join('');
+    box.innerHTML = `<div class="confirm" style="display:grid"><span>${esc(f.name)}: <b class="num">${list.length}</b> позиций. Изменился учёт у <b class="num">${changes.length}</b>, новых <b class="num">${added}</b>. Из изменившихся уже посчитано <b class="num">${counted.length}</b>${counted.length ? ':' : '.'}</span>${lines ? `<div class="upd-list">${lines}</div>` : ''}
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" type="button" id="updGo">Обновить остатки</button><button class="btn" type="button" id="updNo">Отмена</button></div></div>`;
+    $('#updNo').onclick = () => { box.innerHTML = ''; e.target.value = ''; };
+    $('#updGo').onclick = async () => {
+      $('#updGo').disabled = true;
+      try {
+        const recs = [];
+        for (const c of counted) {
+          const x = counts.get(c.key), d = c.nb - (x.b != null ? x.b : c.ob), nv = Object.assign({}, x, {b: c.nb});
+          if ($('#adjFact').checked && d) { nv.q = Math.max(0, Math.round((x.q + d) * 1000) / 1000); nv.adj = Math.round(((x.adj || 0) + d) * 1000) / 1000; }
+          recs.push([c.key, nv]); counts.set(c.key, nv);
+        }
+        await writeChain; await store.saveCounts(audit.id, recs);
+        audit = await store.updateStock(audit, merged, f.name);
+        setStock(merged); syncExtras(); renderAll();
+        box.innerHTML = ''; e.target.value = ''; toast('Остатки обновлены, подсчёты сохранены');
+      } catch(err) { toast('Не удалось обновить: ' + (err.message || err)); $('#updGo').disabled = false; }
+    };
+  } catch(err) { box.innerHTML = `<div class="confirm">Не получилось прочитать файл: ${esc(err.message)}</div>`; }
+});
+$('#adjFact').addEventListener('change', () => { const f = $('#updFile'); if (f.files[0]) f.dispatchEvent(new Event('change')); });
+$('#exportBtn').addEventListener('click', () => {
+  const head = ['№','Категория','Номенклатура','Артикул','Цена за ед., ₸','Учёт','Факт','Разница','Сумма разницы, ₸','Статус','Кто посчитал','Когда','Движение по 1С после подсчёта'];
+  const st = {none: 'Не посчитано', ok: 'Сходится', short: 'Недостача', over: 'Излишек'};
+  const all = [], diffs = [];
+  items.forEach((it, i) => {
+    const s = status(it), c = s.c;
+    const row = [i + 1, it.extra ? 'Сверх учёта' : it.cat, it.name, it.art, it.price, it.book, c ? c.q : '', s.st === 'none' ? '' : s.d,
+      s.st === 'none' ? '' : Math.round(s.d * it.price * 100) / 100, it.extra ? 'Сверх учёта' : st[s.st], c ? (c.by || '') : '', c && c.t ? new Date(c.t).toLocaleString('ru-RU') : '', c && c.adj ? c.adj : ''];
+    all.push(row); if (s.st === 'short' || s.st === 'over') diffs.push(row);
+  });
+  const mk = rows => { const ws = XLSX.utils.aoa_to_sheet([head, ...rows]); ws['!cols'] = [6,28,60,14,12,8,8,9,16,14,18,18,14].map(w => ({wch: w})); return ws; };
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, mk(all), 'Ревизия'); XLSX.utils.book_append_sheet(wb, mk(diffs), 'Расхождения');
+  XLSX.writeFile(wb, `Ревизия_запчасти_${new Date().toISOString().slice(0, 10)}.xlsx`);
+});
+
+/* ---------- list events ---------- */
+let qT;
+$('#q').addEventListener('input', e => { clearTimeout(qT); qT = setTimeout(() => { query = e.target.value.trim(); shown = PAGE; renderList(); }, 80); });
+$('#q').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); query = e.target.value.trim(); renderList(); const f = $('#list .row:not(.hdr) input'); if (f) { f.focus(); f.select(); } }
+  else if (e.key === 'Escape') { e.target.value = ''; query = ''; renderList(); }
+});
+$('#chips').addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; filter = b.dataset.f; shown = PAGE; renderStats(); renderList(); });
+$('#cat').addEventListener('change', e => { catFilter = e.target.value; shown = PAGE; renderList(); });
+$('#list').addEventListener('click', e => {
+  if (e.target.id === 'moreBtn') { shown += PAGE * 2; renderList(); return; }
+  if (e.target.classList.contains('x')) { const it = byKey.get(e.target.closest('.row').dataset.key); if (!it) return; persist(it.key, null); syncExtras(); renderAll(); toast(`Подсчёт ${it.art} сброшен`); }
+});
+$('#list').addEventListener('keydown', e => {
+  if (e.target.tagName !== 'INPUT' || !e.target.closest('.fact')) return;
+  if (e.key === 'Enter') { e.preventDefault(); const it = byKey.get(e.target.closest('.row').dataset.key);
+    if (commitTyped(it, e.target.value)) { e.target.dataset.done = '1'; $('#q').value = ''; query = ''; $('#q').focus(); renderList(); } }
+});
+$('#list').addEventListener('focusout', e => {
+  if (e.target.tagName !== 'INPUT' || !e.target.closest('.fact')) return;
+  if (e.target.dataset.done) { delete e.target.dataset.done; return; }
+  const it = byKey.get(e.target.closest('.row')?.dataset.key);
+  if (it && e.target.value.trim() !== '') commitTyped(it, e.target.value);
+  if (it) updateRow(it);
+});
+['speakAll', 'speakBad', 'useAI'].forEach(id => { const el = $('#' + id); el.checked = lsGet('rv-' + id, el.checked); el.addEventListener('change', () => lsSet('rv-' + id, el.checked)); });
+
+/* ---------- start ---------- */
+async function boot(){
+  $('#aiState').textContent = store.mode === 'cloud' ? '' : 'ИИ работает только с подключённым Supabase';
+  $('#demoBanner').hidden = store.mode === 'cloud';
+  if (!SR) $('#micState').textContent = 'Распознавание речи доступно в Google Chrome';
+  let who = null;
+  try { who = await store.init(); } catch(e) { toast('Не удалось подключиться: ' + (e.message || e)); }
+  if (!who) { $('#loginView').hidden = false; return; }
+  me = who; $('#appView').hidden = false;
+  try { await loadAudit(); } catch(e) { setSync('local', 'Ошибка загрузки'); toast('Ошибка загрузки: ' + (e.message || e)); }
+}
+$('#loginForm').addEventListener('submit', async e => {
+  e.preventDefault(); $('#lgErr').textContent = '';
+  try { me = await store.login($('#lgEmail').value.trim(), $('#lgPass').value); $('#loginView').hidden = true; $('#appView').hidden = false; await loadAudit(); }
+  catch(err) { $('#lgErr').textContent = 'Неверная почта или пароль'; }
+});
+$('#logoutBtn').addEventListener('click', async () => { stopListening(); await store.logout(); location.reload(); });
+boot();
+</script>
+
+</body>
+</html>

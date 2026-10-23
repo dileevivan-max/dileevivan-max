@@ -242,7 +242,7 @@ body:not(.can-fv) .fv-only{display:none!important}
   <div class="bar" style="margin-top:10px">
     <span class="muted" id="ptCount"></span><span class="grow"></span>
     <button class="btn edit-only" id="btnGeoAll">Найти координаты для точек без них</button>
-    <label class="btn edit-only" for="xlsFile">Загрузить график из Excel</label><input type="file" id="xlsFile" accept=".xlsx,.xls" hidden>
+    <button class="btn edit-only" id="btnTpl">Шаблон Excel</button><label class="btn edit-only" for="xlsFile">Загрузить клиентов из Excel</label><input type="file" id="xlsFile" accept=".xlsx,.xls" hidden>
   </div>
   <div class="scroll"><table class="tbl" id="ptTable"></table></div>
   <p class="hint">Закрытые точки и точки «по телефону» остаются в списке, но в маршруты не попадают. Точки с одинаковой группой (или одним адресом) всегда ставятся в один день.</p>
@@ -434,6 +434,7 @@ function routeOrder(start,nodes,full){
   return path.slice(1);
 }
 function visitMin(p){return p.visitMin||S.settings.visit[p.category]||20}
+function hasXY(p){return !!p&&p.lat!==null&&p.lat!==undefined&&p.lat!==''&&p.lng!==null&&p.lng!==undefined&&p.lng!==''&&Number.isFinite(+p.lat)&&Number.isFinite(+p.lng)}
 function freqOf(p){if(p.freq!==null&&p.freq!==undefined&&p.freq!=='')return Number(p.freq);const m=S.managers.find(x=>x.id===p.managerId);if(m&&m.districts&&m.districts[p.district]&&m.districts[p.district].far)return 1;return S.settings.norms[p.category]??1}
 function distCfg(m,district){m.districts=m.districts||{};if(!m.districts[district])m.districts[district]={days:m.weekdays.slice(),far:false};return m.districts[district]}
 
@@ -500,8 +501,8 @@ function unitOptions(m,unit,dates,warn){
 const tick=()=>new Promise(r=>setTimeout(r,0));
 async function planMonth(m,ym,onProg){
   const dates=workDates(m,ym);const warn=new Set();
-  const pts=mgrPoints(m).filter(p=>p.status==='active'&&isFinite(p.lat)&&isFinite(p.lng)&&freqOf(p)>0);
-  const noCoord=mgrPoints(m).filter(p=>p.status==='active'&&!(isFinite(p.lat)&&isFinite(p.lng)));
+  const pts=mgrPoints(m).filter(p=>p.status==='active'&&hasXY(p)&&freqOf(p)>0);
+  const noCoord=mgrPoints(m).filter(p=>p.status==='active'&&!(hasXY(p)));
   if(noCoord.length)warn.add(noCoord.length+' точек без координат не попали в график — укажите координаты во вкладке «Торговые точки».');
   if(!dates.length)throw new Error('В этом месяце нет рабочих дней менеджера.');
   const byId=Object.fromEntries(pts.map(p=>[p.id,p]));
@@ -582,7 +583,7 @@ async function renderPlan(){
       </tbody></table></div>`:''}
       <div class="dayfoot">${links.map((u,i)=>`<a href="${u}" target="_blank" rel="noopener">2ГИС${links.length>1?' — часть '+(i+1):''}</a>`).join('')}
         <span class="grow"></span>${canEdit()?`
-        <select data-add="${k}" aria-label="Добавить точку в день"><option value="">+ точку…</option>${mgrPoints(m).filter(p=>p.status==='active'&&!ids.includes(p.id)).sort((a,b)=>a.district.localeCompare(b.district)||a.name.localeCompare(b.name)).map(p=>`<option value="${p.id}">${esc(p.district)}: ${esc(p.name)}</option>`).join('')}</select>
+        <select data-add="${k}" aria-label="Добавить точку в день"><option value="">+ точку…</option>${mgrPoints(m).filter(p=>p.status==='active'&&hasXY(p)&&!ids.includes(p.id)).sort((a,b)=>a.district.localeCompare(b.district)||a.name.localeCompare(b.name)).map(p=>`<option value="${p.id}">${esc(p.district)}: ${esc(p.name)}</option>`).join('')}</select>
         ${ids.length>1?`<button class="btn small" data-reopt="${k}">Пересчитать порядок</button>`:''}
         <select data-swap="${k}" aria-label="Поменять день местами"><option value="">⇄ поменять с…</option>${allDates.filter(x=>x!==k).map(x=>`<option value="${x}">${parseKey(x).getDate()} ${WD[parseKey(x).getDay()]}</option>`).join('')}</select>`:''}
       </div></article>`);
@@ -654,7 +655,7 @@ function renderPoints(){
    <td>${!canEdit()?statusLabel(p.status):`<select data-pstatus="${p.id}" aria-label="Статус"><option value="active"${p.status==='active'?' selected':''}>посещается</option><option value="paused"${p.status==='paused'?' selected':''}>не посещается</option><option value="phone"${p.status==='phone'?' selected':''}>по телефону</option><option value="closed"${p.status==='closed'?' selected':''}>закрыта</option></select>`}</td>
    <td class="num">${p.freq!==null&&p.freq!==undefined&&p.freq!==''?`<b>${p.freq}</b>`:`<span class="muted">${freqOf(p)}</span>`}</td>
    <td>${esc(p.cluster||'')}</td>
-   <td>${isFinite(p.lat)&&isFinite(p.lng)?'<span class="pill">есть</span>':'<span class="pill bad">нет</span>'}</td>
+   <td>${hasXY(p)?'<span class="pill">есть</span>':'<span class="pill bad">нет</span>'}</td>
    <td style="white-space:nowrap">${canEdit()?`<button class="btn small" data-edit="${p.id}">Изменить</button> <button class="btn small danger" data-del="${p.id}">Удалить</button>`:''}</td></tr>`).join('')}</tbody>`;
 }
 function openForm(p){
@@ -684,17 +685,55 @@ async function geocode(q){
 }
 function geoQuery(p){const loc=p.locality&&p.locality!==p.district?p.locality:'';const city=/район|ский$/i.test(p.district)&&!loc?'Алматы':'';return [p.address,loc,city,'Казахстан'].filter(Boolean).join(', ')}
 
+// ---------- массовая загрузка клиентов по шаблону ----------
+const TPL_COLS=['Менеджер','Район','Населённый пункт / ориентир','Клиент','Адрес','Категория','Статус','Координаты','Визитов в месяц','Минут на визит','Группа (рынок)','Комментарий'];
+function normStatus(s){s=String(s??'').trim().toLowerCase();if(!s)return 'active';if(s.startsWith('не'))return 'paused';if(s.includes('телеф'))return 'phone';if(s.startsWith('закр')||s.includes('не работ'))return 'closed';return 'active'}
+function parseCoords(v){if(v==null||v==='')return null;const n=String(v).replace(/[;|]/g,',').match(/-?\d+(?:[.,]\d+)?/g);if(!n||n.length<2)return null;
+  let a=parseFloat(n[0].replace(',','.')),b=parseFloat(n[n.length>2?2:1].replace(',','.'));
+  if(n.length===4){a=parseFloat(n[0]+'.'+n[1]);b=parseFloat(n[2]+'.'+n[3])}
+  if(!isFinite(a)||!isFinite(b))return null;return a>b?{lat:b,lng:a}:{lat:a,lng:b}}
+function importTemplate(rows,hi){
+  const head=rows[hi].map(x=>String(x??'').trim().toLowerCase());const col=k=>head.findIndex(h=>h.startsWith(k));
+  const C={mgr:col('менеджер'),dist:col('район'),loc:col('населён')>=0?col('населён'):col('населен'),name:col('клиент'),addr:col('адрес'),cat:col('категор'),st:col('статус'),xy:col('координат'),lat:col('широт'),lng:col('долгот'),fr:col('визитов'),vm:col('минут'),cl:col('группа')};
+  const v=(r,i)=>i<0?'':String(r[i]??'').trim();const num=(r,i)=>{const s=v(r,i).replace(',','.');return s===''||isNaN(+s)?null:+s};
+  let added=0,updated=0,skipped=[];const changed=[],touchedM=new Set();
+  for(let i=hi+1;i<rows.length;i++){const r=rows[i];if(!r||r.every(x=>x===null||x===''))continue;
+    const name=v(r,C.name);if(!name||/^пример/i.test(v(r,C.mgr))||/^пример/i.test(name)){continue}
+    const mn=v(r,C.mgr).toLowerCase();let m=mn?S.managers.find(x=>x.name.toLowerCase()===mn)||S.managers.find(x=>x.name.toLowerCase().includes(mn)||mn.includes(x.name.toLowerCase())):mgr();
+    if(!m){skipped.push(`строка ${i+1}: менеджер «${v(r,C.mgr)}» не найден`);continue}
+    const dist=v(r,C.dist)||v(r,C.loc)||'Без района',loc=v(r,C.loc),addr=v(r,C.addr);
+    let xy=C.xy>=0?parseCoords(r[C.xy]):null;if(!xy&&C.lat>=0){const la=num(r,C.lat),ln=num(r,C.lng);if(la!=null&&ln!=null)xy={lat:la,lng:ln}}
+    const data={name,district:dist,locality:loc,address:addr,category:normCat(v(r,C.cat)),status:normStatus(v(r,C.st)),freq:num(r,C.fr),visitMin:num(r,C.vm),cluster:v(r,C.cl)};
+    const ex=S.points.find(p=>p.managerId===m.id&&p.district===dist&&p.name===name&&p.address===addr);
+    if(ex){Object.assign(ex,data);if(xy){ex.lat=xy.lat;ex.lng=xy.lng}changed.push(ex);updated++}
+    else{const nn=Math.max(0,...S.points.filter(p=>p.managerId===m.id&&p.district===dist).map(p=>Number(p.num)||0))+1;
+      const np=Object.assign({id:m.id+'-'+uid(),managerId:m.id,num:nn,lat:xy?xy.lat:null,lng:xy?xy.lng:null},data);S.points.push(np);changed.push(np);added++}
+    if(!m.districts||!m.districts[dist]){distCfg(m,dist)}touchedM.add(m);
+  }
+  renderPoints();
+  if(changed.length)apiSafe('savePoint',{points:changed}).then(()=>Promise.all([...touchedM].map(m=>apiSafe('saveManager',{manager:m})))).catch(()=>{});
+  const noXY=changed.filter(p=>!hasXY(p)).length;
+  toast(`Загружено: новых ${added}, обновлено ${updated}${skipped.length?', пропущено '+skipped.length+' ('+skipped.slice(0,3).join('; ')+')':''}.${noXY?' Без координат: '+noXY+' — нажмите «Найти координаты для точек без них».':''} Чтобы клиенты попали в маршруты, постройте график заново.`,12000);
+}
+function downloadTemplate(){
+  const m=mgr();const ex1=[m?m.name:'Попов Дмитрий','Жетысуский','Алматы','ИП Пример','ул. Райымбека, 239','A','посещается','43.268412, 76.896581','','','',''];
+  const ex2=[m?m.name:'Попов Дмитрий','Алатауский','рынок Кенжехан','Пример Строй','Кенжехан, бутик 15','B','посещается','','','30','Кенжехан','координаты найдёт программа'];
+  const ws=XLSX.utils.aoa_to_sheet([TPL_COLS,['Пример →',...ex1.slice(1)],['Пример →',...ex2.slice(1)]]);ws['!cols']=TPL_COLS.map((c,i)=>({wch:[18,16,22,26,30,10,14,22,10,10,14,26][i]}));
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Клиенты');XLSX.writeFile(wb,'Шаблон_клиенты_МПП.xlsx');
+}
 // ---------- импорт Excel ----------
 function importExcel(file){
-  const m=mgr();if(!m){toast('Сначала выберите менеджера');return}
+  const m=mgr();
   const rd=new FileReader();rd.onload=e=>{
     try{
       const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});const ws=wb.Sheets[wb.SheetNames[0]];
       const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:null});
+      const ws2=wb.Sheets['Клиенты']?XLSX.utils.sheet_to_json(wb.Sheets['Клиенты'],{header:1,defval:null}):rows;const hi=ws2.findIndex((r,i)=>i<15&&r&&r.some(x=>/^клиент/i.test(String(x??'').trim()))&&r.some(x=>/^район/i.test(String(x??'').trim())));
+      if(hi>=0){importTemplate(ws2,hi);return}
       let district=null,added=0,updated=0;const changed=[];
       for(const r of rows){
         if(!r||r.every(x=>x===null||x===''))continue;
-        const first=r[0];
+        const first=r[0];if(!m){toast('Сначала выберите менеджера');return}
         if(typeof first!=='number'){const s=String(first||'').trim();if(s&&r.slice(1,5).every(x=>x===null||x===''))district=s;continue}
         const name=String(r[1]??'').trim(),loc=String(r[2]??'').trim(),addr=String(r[3]??'').trim(),cat=normCat(r[4]);
         const dist=district||loc||'Без района';
@@ -776,7 +815,7 @@ function drawMap(){
     L.polyline([start,...ordered.map(p=>[p.lat,p.lng])],{color:'#0d6b52',weight:3,opacity:.8,dashArray:'6 6'}).addTo(layer);
     ordered.forEach((p,i)=>{L.marker([p.lat,p.lng],{icon:L.divIcon({className:'',html:`<div style="background:${catColor(p)};color:#fff;border-radius:50%;width:22px;height:22px;display:grid;place-items:center;font:600 11px var(--f-num);border:2px solid #fff">${i+1}</div>`,iconSize:[22,22],iconAnchor:[11,11]})}).bindTooltip(`${i+1}. ${p.name} (${p.category}) — ${fmt(sch.rows[i].arr)}`).addTo(layer);bounds.push([p.lat,p.lng])});
     $('mapInfo').textContent=`${ordered.length} ТТ, конец ${fmt(sch.end)}`;
-  }else{pts=mgrPoints(m).filter(p=>isFinite(p.lat)&&isFinite(p.lng));
+  }else{pts=mgrPoints(m).filter(p=>hasXY(p));
     pts.forEach(p=>{L.circleMarker([p.lat,p.lng],{radius:p.status==='active'?6:4,color:'#fff',weight:1,fillColor:catColor(p),fillOpacity:.9}).bindTooltip(`${p.name} (${p.category}) — ${p.district}`).addTo(layer);bounds.push([p.lat,p.lng])});
     $('mapInfo').textContent=`${pts.length} точек на карте`;}
   if(bounds.length>1)MAP.fitBounds(bounds,{padding:[30,30]});else MAP.setView(start,11);
@@ -824,9 +863,10 @@ function bind(){
     try{const r=await geocode(geoQuery(p));if(r){$('f_lat').value=r.lat.toFixed(6);$('f_lng').value=r.lng.toFixed(6);$('geoMsg').textContent='Найдено: '+r.label.slice(0,90)+'. Проверьте на карте.'}else $('geoMsg').textContent='Не найдено. Уточните адрес или укажите на карте.'}catch(err){$('geoMsg').textContent='Поиск недоступен: '+err.message}};
   $('btnPick').onclick=()=>{picking=true;$('pickName').textContent=$('f_name').value||'новая точка';$('pickBanner').hidden=false;switchTab('map');$('mapDay').value='';drawMap()};
   $('btnPickCancel').onclick=()=>{picking=null;$('pickBanner').hidden=true};
-  $('btnGeoAll').onclick=async()=>{const list=mgrPoints().filter(p=>!(isFinite(p.lat)&&isFinite(p.lng)));if(!list.length){toast('У всех точек есть координаты');return}
+  $('btnGeoAll').onclick=async()=>{const list=mgrPoints().filter(p=>!(hasXY(p)));if(!list.length){toast('У всех точек есть координаты');return}
     let ok=0;for(let i=0;i<list.length;i++){$('ptCount').textContent=`Ищу координаты: ${i+1} из ${list.length}…`;try{const r=await geocode(geoQuery(list[i]));if(r){list[i].lat=r.lat;list[i].lng=r.lng;ok++}}catch(e){}await new Promise(r=>setTimeout(r,1100))}
     renderPoints();if(ok)await apiSafe('savePoint',{points:list.filter(p=>isFinite(p.lat)&&p.lat!==null)}).catch(()=>{});toast(`Найдено ${ok} из ${list.length}. Остальные укажите вручную или на карте. Найденные проверьте на карте.`,7000)};
+  $('btnTpl').onclick=downloadTemplate;
   $('xlsFile').onchange=e=>{if(e.target.files[0])importExcel(e.target.files[0]);e.target.value=''};
   $('btnMgrSave').onclick=saveManager;
   $('btnMgrNew').onclick=async()=>{const m={id:'m'+uid(),name:'Новый менеджер',start:{label:'',lat:43.2567,lng:76.9286},weekdays:[1,2,3,4,5],districts:{}};S.managers.push(m);S.ui.manager=m.id;save();renderManagers();renderDays();try{const j=await apiSafe('saveManager',{manager:m});m.token=j.token;renderDays();toast('Менеджер создан — заполните ФИО и место выезда')}catch(e){}};

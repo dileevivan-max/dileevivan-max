@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<!-- версия 2026-10-21 18:45 -->
+<!-- версия 2026-10-23 -->
 <meta name="theme-color" content="#2c5b4e">
 <title>Ревизия запчастей МСЦ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -189,6 +189,12 @@ h1{font-family:var(--f-display);font-weight:600;font-size:22px;letter-spacing:.0
 .login .err{color:var(--short);font-size:13px}
 .demo-banner{background:var(--over-soft);color:var(--ink);font-size:13px;padding:8px 12px;border-radius:8px}
 .hist{display:grid;gap:6px}
+.head-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+.topfin{padding:6px 12px;font-size:13px;font-weight:600}
+.modal{position:fixed;inset:0;z-index:30;background:color-mix(in srgb,var(--ink) 45%,transparent);display:grid;place-items:center;padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.modal .sheet{background:var(--surface);color:var(--ink);border-radius:12px;padding:18px;max-width:560px;width:100%;max-height:90vh;overflow:auto;display:grid;gap:12px;box-shadow:0 10px 40px rgba(0,0,0,.25)}
+.modal h2{margin:0;font-family:var(--f-display);font-size:20px}
+.modal .confirm{background:transparent;padding:0}
 .row.unk .uart{width:110px;text-align:left;font-size:14px}
 .row.unk.done{opacity:.55}
 @media (max-width:720px){.row.unk .diff{grid-area:diff}.row.unk .fact{grid-area:fact}}
@@ -216,7 +222,10 @@ h1{font-family:var(--f-display);font-weight:600;font-size:22px;letter-spacing:.0
         <h1>Ревизия запчастей</h1>
         <div class="sub" id="sub">Склад МСЦ</div>
       </div>
-      <span class="sync" id="sync"><i></i><span>Подключение…</span></span>
+      <div class="head-actions">
+        <span class="sync" id="sync"><i></i><span>Подключение…</span></span>
+        <button class="btn danger topfin" type="button" id="finishTopBtn" hidden>Завершить ревизию</button>
+      </div>
     </div>
     <div class="progress">
       <div class="bar" id="bar" aria-hidden="true"></div>
@@ -281,6 +290,9 @@ h1{font-family:var(--f-display);font-weight:600;font-size:22px;letter-spacing:.0
     </div>
   </details>
 </main>
+</div>
+<div class="modal" id="finishModal" hidden role="dialog" aria-modal="true" aria-labelledby="finTitle">
+  <div class="sheet"><h2 id="finTitle">Завершить ревизию</h2><div id="finishSheet"></div></div>
 </div>
 <div class="toast" id="toast" hidden></div>
 
@@ -1001,7 +1013,7 @@ function testVoice(){
 async function loadAudit(){
   audit = await store.currentAudit();
   counts = new Map(); unknowns = [];
-  $('#finishBlk').hidden = $('#updBlk').hidden = !audit;
+  $('#finishBlk').hidden = $('#updBlk').hidden = $('#finishTopBtn').hidden = !audit;
   $('#finishBox').innerHTML = ''; $('#finishBox').appendChild(finishBtnEl);
   renderHistory();
   if (!audit) { setStock([]); renderAll(); return; }
@@ -1137,7 +1149,12 @@ $('#exportBtn').addEventListener('click', () => {
 
 /* ---------- finishing an audit and history ---------- */
 const finishBtnEl = $('#finishBtn');
-finishBtnEl.addEventListener('click', () => {
+function closeFinish(){ $('#finishModal').hidden = true; $('#finishSheet').innerHTML = ''; }
+$('#finishModal').addEventListener('click', e => { if (e.target.id === 'finishModal' && !$('#finGo')?.disabled) closeFinish(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#finishModal').hidden && !$('#finGo')?.disabled) closeFinish(); });
+finishBtnEl.addEventListener('click', openFinish);
+$('#finishTopBtn').addEventListener('click', openFinish);
+function openFinish(){
   if (!audit) return;
   let total = 0, done = 0, todoSum = 0, sh = 0, ov = 0, shSum = 0, ovSum = 0;
   const todo = [];
@@ -1146,14 +1163,14 @@ finishBtnEl.addEventListener('click', () => {
     if (!it.extra) { total++; if (s.st === 'none') { todo.push(it); todoSum += it.book * it.price; } else done++; }
     if (s.st === 'short') { sh++; shSum += -s.d * it.price; } if (s.st === 'over') { ov++; ovSum += s.d * it.price; }
   }
-  const box = $('#finishBox');
+  const box = $('#finishSheet'); $('#finishModal').hidden = false;
   box.innerHTML = `<div class="confirm" style="display:grid;gap:10px">
     <span>Посчитано <b class="num">${done}</b> из <b class="num">${total}</b>. Сейчас: недостача <b class="num">${sh}</b> поз. на <b class="num">${money(shSum)}</b>, излишек <b class="num">${ov}</b> поз. на <b class="num">${money(ovSum)}</b>.</span>
     ${unknowns.some(u => !u.resolved) ? `<span>Нераспознанных фраз не разобрано: <b class="num">${unknowns.filter(u => !u.resolved).length}</b> — они попадут в отдельный лист Excel.</span>` : ''}
     ${todo.length ? `<span>Не посчитано <b class="num">${todo.length}</b> поз. (по учёту на <b class="num">${money(todoSum)}</b>).</span>
       <label class="chk"><input type="checkbox" id="zeroRest" checked> Записать непосчитанные как отсутствующие: факт 0, они уйдут в недостачу. Снимите галочку, если в отчёте они должны остаться «не посчитано».</label>` : ''}
     <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" type="button" id="finGo">Завершить и выгрузить в Excel</button><button class="btn" type="button" id="finNo">Отмена</button></div></div>`;
-  $('#finNo').onclick = () => { box.innerHTML = ''; box.appendChild(finishBtnEl); };
+  $('#finNo').onclick = closeFinish;
   $('#finGo').onclick = async () => {
     $('#finGo').disabled = true; $('#finGo').textContent = 'Завершаю…';
     try {
@@ -1168,11 +1185,12 @@ finishBtnEl.addEventListener('click', () => {
       exportExcel(items, counts, fin.title, null, unknowns);
       await store.finishAudit(fin, me.name);
       store.logEvent({audit_id: fin.id, art: null, mode: 'finish', text: 'ревизия завершена', source: 'manual', by_name: me.name});
+      closeFinish();
       await loadAudit();
       toast('Ревизия завершена, файл Excel сохранён');
     } catch(err) { toast('Не удалось завершить: ' + (err.message || err)); $('#finGo').disabled = false; $('#finGo').textContent = 'Завершить и выгрузить в Excel'; }
   };
-});
+}
 async function renderHistory(){
   const box = $('#history');
   let list = [];

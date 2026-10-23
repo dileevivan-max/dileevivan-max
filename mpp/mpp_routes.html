@@ -210,7 +210,7 @@ body:not(.can-fv) .fv-only{display:none!important}
   <div class="bar">
     <input type="text" id="ptSearch" class="grow" placeholder="Поиск по названию или адресу">
     <select id="ptDistrict"></select>
-    <select id="ptStatus"><option value="">Все статусы</option><option value="active">Посещаются</option><option value="phone">По телефону</option><option value="closed">Закрыты</option></select>
+    <select id="ptStatus"><option value="">Все статусы</option><option value="active">Посещаются</option><option value="paused">Не посещаются</option><option value="phone">По телефону</option><option value="closed">Закрыты</option></select>
     <select id="ptCat"></select>
     <button class="btn primary edit-only" id="btnAddPt">Добавить точку</button>
   </div>
@@ -222,7 +222,7 @@ body:not(.can-fv) .fv-only{display:none!important}
       <label>Населённый пункт / рынок<input type="text" id="f_locality"></label>
       <label>Адрес<input type="text" id="f_address"></label>
       <label>Категория<select id="f_category"></select></label>
-      <label>Статус<select id="f_status"><option value="active">Посещается</option><option value="phone">Только по телефону</option><option value="closed">Закрыта / не работает</option></select></label>
+      <label>Статус<select id="f_status"><option value="active">Посещается</option><option value="paused">Не посещается (пауза)</option><option value="phone">Только по телефону</option><option value="closed">Закрыта / не работает</option></select></label>
       <label>Визитов в месяц (если не по нормативу)<input type="number" id="f_freq" min="0" max="8" placeholder="норматив"></label>
       <label>Минут на визит (если не стандарт)<input type="number" id="f_visit" min="5" max="120" placeholder="стандарт"></label>
       <label>Группа (рынок, проходится за раз)<input type="text" id="f_cluster" placeholder="например: Кенжехан"></label>
@@ -331,7 +331,7 @@ body:not(.can-fv) .fv-only{display:none!important}
       </div>
       <div class="banner" id="resetConfirm" hidden>Менеджеры, точки и графики в таблице будут заменены. Коды доступа менеджеров сохранятся. <button class="btn small danger" id="btnResetYes">Заменить</button> <button class="btn small" id="btnResetNo">Отмена</button></div>
       <div class="admin-only" style="margin-top:16px"><h3 style="margin-bottom:6px">Доступы руководителей</h3>
-        <p class="hint" style="margin:0 0 8px">РОП — права руководителя и чек-лист сопровождения. ДФ — видит всех менеджеров и маршруты, заполняет чек-лист, маршруты не меняет.</p>
+        <p class="hint" style="margin:0 0 8px">РОП — права руководителя и чек-лист сопровождения. ДФ — те же права: правит графики, маршруты и точки, заполняет чек-лист.</p>
         <div class="scroll"><table class="tbl" id="supTable"></table></div>
         <div class="bar" style="margin-top:8px"><input type="text" id="supName" placeholder="ФИО" class="grow"><select id="supRole"><option value="rop">РОП</option><option value="df">ДФ</option></select><button class="btn" id="btnSupAdd">Добавить</button></div></div>
       <p class="hint" style="margin-top:12px">Подключение: <span id="cfgShow" class="num"></span> <button class="btn small" id="btnCfgChange">Изменить</button></p>
@@ -357,7 +357,7 @@ const DEF_SETTINGS={arrive:'09:00',lunch:'13:00',lunchMin:60,end:'18:00',speed:2
 
 // ---------- связь с таблицей ----------
 let S={settings:JSON.parse(JSON.stringify(DEF_SETTINGS)),managers:[],points:[],plans:{},visits:{},ui:{},role:null,me:null,name:null,sups:[],fv:{}};
-const canEdit=()=>S.role==='admin'||S.role==='rop';
+const canEdit=()=>S.role==='admin'||S.role==='rop'||S.role==='df';
 const canFv=()=>S.role==='rop'||S.role==='df';
 let API='',TOKEN='';
 function lsGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
@@ -621,7 +621,7 @@ function renderFreq(plan){
   $('freqTable').innerHTML=`<table class="tbl"><thead><tr><th>Район</th><th>Клиент</th><th>Кат.</th><th>Статус</th><th>Норматив</th><th>В графике</th></tr></thead><tbody>${rows.map(p=>{const n=p.status==='active'?freqOf(p):0,v=c[p.id]||0;return `<tr class="${p.status!=='active'?'closed':''}"><td>${esc(p.district)}</td><td>${esc(p.name)}</td><td><span class="cat">${esc(p.category)}</span></td><td>${statusLabel(p.status)}</td><td class="num">${n}</td><td class="num">${v}${v!==n?` <span class="pill ${v<n?'bad':'warn'}">${v<n?'меньше':'больше'}</span>`:''}</td></tr>`}).join('')}</tbody></table>`;
 }
 const vsPill=v=>`<span class="vs ${esc(v.status)}">${{done:'был',moved:'перенесён',closed:'закрыта',missed:'не был'}[v.status]||esc(v.status)}${v.time?' '+esc(v.time):''}</span>`;
-const statusLabel=s=>s==='phone'?'<span class="pill grey">по телефону</span>':s==='closed'?'<span class="pill grey">закрыта</span>':'посещается';
+const statusLabel=s=>s==='paused'?'<span class="pill grey">не посещается</span>':s==='phone'?'<span class="pill grey">по телефону</span>':s==='closed'?'<span class="pill grey">закрыта</span>':'посещается';
 function monthName(){const [y,m]=curYM().split('-').map(Number);return ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'][m-1]+' '+y}
 
 async function doBuild(){
@@ -647,11 +647,11 @@ function renderPoints(){
   $('dlDistricts').innerHTML=dists.map(d=>`<option value="${esc(d)}">`).join('');
   const q=$('ptSearch').value.trim().toLowerCase(),fd=dsel.value,fs=$('ptStatus').value,fc=csel.value;
   const rows=all.filter(p=>(!q||(p.name+' '+p.address+' '+p.locality).toLowerCase().includes(q))&&(!fd||p.district===fd)&&(!fs||p.status===fs)&&(!fc||p.category===fc));
-  $('ptCount').textContent=`Показано ${rows.length} из ${all.length}. Посещаются: ${all.filter(p=>p.status==='active').length}, по телефону: ${all.filter(p=>p.status==='phone').length}, закрыты: ${all.filter(p=>p.status==='closed').length}.`;
+  $('ptCount').textContent=`Показано ${rows.length} из ${all.length}. Посещаются: ${all.filter(p=>p.status==='active').length}, не посещаются: ${all.filter(p=>p.status==='paused').length}, по телефону: ${all.filter(p=>p.status==='phone').length}, закрыты: ${all.filter(p=>p.status==='closed').length}.`;
   $('ptTable').innerHTML=`<thead><tr><th>№</th><th>Клиент</th><th>Район / пункт</th><th>Адрес</th><th>Кат.</th><th>Статус</th><th>Визитов</th><th>Группа</th><th>Коорд.</th><th></th></tr></thead><tbody>${rows.map(p=>`<tr class="${p.status!=='active'?'closed':p.category==='B'?'cB':(p.category==='A'||p.category==='AAA')?'cA':''}">
    <td class="num">${esc(p.num??'')}</td><td><b>${esc(p.name)}</b></td><td>${esc(p.district)}${p.locality&&p.locality!==p.district?'<br><span class="muted">'+esc(p.locality)+'</span>':''}</td><td>${esc(p.address)}</td>
    <td>${canEdit()?`<select data-pcat="${p.id}" aria-label="Категория">${CATS.map(c=>`<option${c===p.category?' selected':''}>${c}</option>`).join('')}</select>`:`<span class="cat">${esc(p.category)}</span>`}</td>
-   <td>${!canEdit()?statusLabel(p.status):`<select data-pstatus="${p.id}" aria-label="Статус"><option value="active"${p.status==='active'?' selected':''}>посещается</option><option value="phone"${p.status==='phone'?' selected':''}>по телефону</option><option value="closed"${p.status==='closed'?' selected':''}>закрыта</option></select>`}</td>
+   <td>${!canEdit()?statusLabel(p.status):`<select data-pstatus="${p.id}" aria-label="Статус"><option value="active"${p.status==='active'?' selected':''}>посещается</option><option value="paused"${p.status==='paused'?' selected':''}>не посещается</option><option value="phone"${p.status==='phone'?' selected':''}>по телефону</option><option value="closed"${p.status==='closed'?' selected':''}>закрыта</option></select>`}</td>
    <td class="num">${p.freq!==null&&p.freq!==undefined&&p.freq!==''?`<b>${p.freq}</b>`:`<span class="muted">${freqOf(p)}</span>`}</td>
    <td>${esc(p.cluster||'')}</td>
    <td>${isFinite(p.lat)&&isFinite(p.lng)?'<span class="pill">есть</span>':'<span class="pill bad">нет</span>'}</td>
@@ -725,7 +725,7 @@ function exportExcel(){
   const c=countVisits(plan);
   const fq=[['Район','№','Клиент','Адрес','Категория','Статус','Норматив','В графике','Даты']];
   const dates={};for(const [k,ids] of Object.entries(plan.days))for(const id of ids)(dates[id]=dates[id]||[]).push(parseKey(k).getDate());
-  mgrPoints(m).forEach(p=>fq.push([p.district,p.num??'',p.name,p.address,p.category,p.status==='active'?'посещается':p.status==='phone'?'по телефону':'закрыта',p.status==='active'?freqOf(p):0,c[p.id]||0,(dates[p.id]||[]).sort((a,b)=>a-b).join(', ')]));
+  mgrPoints(m).forEach(p=>fq.push([p.district,p.num??'',p.name,p.address,p.category,p.status==='active'?'посещается':p.status==='paused'?'не посещается':p.status==='phone'?'по телефону':'закрыта',p.status==='active'?freqOf(p):0,c[p.id]||0,(dates[p.id]||[]).sort((a,b)=>a-b).join(', ')]));
   const ws2=XLSX.utils.aoa_to_sheet(fq);ws2['!cols']=[{wch:20},{wch:5},{wch:32},{wch:36},{wch:9},{wch:12},{wch:9},{wch:9},{wch:16}];
   XLSX.utils.book_append_sheet(wb,ws2,'Частота');
   XLSX.writeFile(wb,`График_${m.name.replace(/[^\wа-яА-ЯёЁ]+/g,'_')}_${curYM()}.xlsx`);

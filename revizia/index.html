@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<!-- версия 2026-10-23 -->
+<!-- версия 2026-10-23b -->
 <meta name="theme-color" content="#2c5b4e">
 <title>Ревизия запчастей МСЦ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -235,7 +235,7 @@ h1{font-family:var(--f-display);font-weight:600;font-size:22px;letter-spacing:.0
       <button class="bigmic" id="micBtn" type="button" aria-label="Включить микрофон"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg></button>
       <div class="caption">
         <span class="st" id="micState">Нажмите микрофон, чтобы начать</span>
-        <span class="heard" id="heard">Говорите: «61 21 652 — три штуки», «нашли ещё пять», «исправь последнее на 5», «исправь артикул на 52 303», «удали последнюю запись»</span>
+        <span class="heard" id="heard">Говорите: «61 21 652 — три штуки» (повтор артикула прибавит), «всего 5» — перезаписать, «исправь последнее на 5», «исправь артикул на 52 303», «удали последнюю запись»</span>
       </div>
     </div>
     <div class="alert" id="alert" role="status" aria-live="assertive"></div>
@@ -339,6 +339,7 @@ const LocalStore = {
   async logEvent(){},
   async loadUnknowns(id){ return lsGet('rv-unk-' + id, []); },
   async addUnknown(r){ const l = lsGet('rv-unk-' + r.audit_id, []); const row = Object.assign({id: Date.now() + Math.random(), at: new Date().toISOString(), resolved: false}, r); l.push(row); lsSet('rv-unk-' + r.audit_id, l); return row; },
+  async updateUnknown(auditId, id, f){ const l = lsGet('rv-unk-' + auditId, []); const r = l.find(x => x.id === id); if (r) Object.assign(r, f); lsSet('rv-unk-' + auditId, l); },
   async resolveUnknown(auditId, id, note){ const l = lsGet('rv-unk-' + auditId, []); const r = l.find(x => x.id === id); if (r) { r.resolved = true; r.resolved_note = note; } lsSet('rv-unk-' + auditId, l); },
   async newAudit(title, stock, fname){ const a = {id: 'L' + Date.now(), title, created_at: new Date().toISOString(), stock, stock_ver: String(Date.now()), stock_at: new Date().toISOString(), stock_file: fname}; lsSet('rv-audit', a); return a; },
   async updateStock(a, stock, fname){ const n = Object.assign({}, a, {stock, stock_ver: String(Date.now()), stock_at: new Date().toISOString(), stock_file: fname}); lsSet('rv-audit', n); return n; },
@@ -390,6 +391,7 @@ const SbStore = {
   async logEvent(ev){ try { await this.sb.from('events').insert(ev); } catch(e) {} },
   async loadUnknowns(id){ const {data, error} = await this.sb.from('unknowns').select('*').eq('audit_id', id).order('at', {ascending: true}).range(0, 4999); if (error) throw error; return data; },
   async addUnknown(r){ const {data, error} = await this.sb.from('unknowns').insert(r).select().single(); if (error) throw error; return data; },
+  async updateUnknown(auditId, id, f){ const {error} = await this.sb.from('unknowns').update(f).eq('id', id); if (error) throw error; },
   async resolveUnknown(auditId, id, note){ const {error} = await this.sb.from('unknowns').update({resolved: true, resolved_note: note}).eq('id', id); if (error) throw error; },
   async newAudit(title, stock, fname){
     await this.sb.from('audits').update({active: false}).eq('active', true);
@@ -601,8 +603,10 @@ function modeOf(words){
   const w = words.join(' ');
   if (/(^|\s)(ещ|плюс|добав|прибав|дополн|докин)/.test(w)) return 'add';
   if (/(^|\s)(минус|убер|убра|отним|убав|спиш)/.test(w)) return 'sub';
-  return 'set';
+  if (EXPLICIT_TOTAL.test(w)) return 'set';
+  return 'auto';   // first time = this many; named again = add to what was counted
 }
+const EXPLICIT_TOTAL = /(^|\s)(итого|итог|всего|ровно|в сумме|общее|общим|окончательно)/;
 const QTY_WORD = /^(шт|штук|штуки|штука|штучк|единиц|комплект)/;
 function parseLocal(text){
   const toks = tokenize(text), cmds = [];
@@ -623,9 +627,9 @@ function parseLocal(text){
   done();
   for (const c of cmds) {
     c.mode = modeOf(c.words);
-    if (c.qty == null && c.mode === 'set' && c.words.some(w => /^(нет|отсутств|ноль|нисколько)/.test(w))) c.qty = 0;
+    if (c.qty == null && (c.mode === 'set' || c.mode === 'auto') && c.words.some(w => /^(нет|отсутств|ноль|нисколько)/.test(w))) c.qty = 0;
     // "нашли ещё 5 штук" without an article: only right after a recorded position and only with a clear cue
-    if (!c.it && !c.amb && !c.bad && c.nums.length === 1 && lastItem && c.mode !== 'set' && Date.now() - lastAt < 120000 && c.words.length <= 5)
+    if (!c.it && !c.amb && !c.bad && c.nums.length === 1 && lastItem && (c.mode === 'add' || c.mode === 'sub') && Date.now() - lastAt < 120000 && c.words.length <= 5)
       { c.it = lastItem; c.qty = +c.nums[0]; c.nums = []; c.viaLast = true; }
     c.ok = !!(c.it && c.qty != null && isFinite(c.qty) && !c.nums.length);
   }
@@ -656,30 +660,35 @@ function candidatesFor(text){
 }
 
 /* ---------- voice: applying and feedback ---------- */
-let voiceLog = [], lastEvent = null;
+let voiceLog = [];
 function applyCmd(it, mode, n, text, source){
   const cur = counts.get(it.key), prev = cur && cur.q != null ? cur.q : null;
+  const summed = mode === 'auto' && prev != null;
+  if (mode === 'auto') mode = prev != null ? 'add' : 'set';
   let q = mode === 'add' ? (prev || 0) + n : mode === 'sub' ? Math.max(0, (prev || 0) - n) : n;
   q = Math.round(q * 1000) / 1000;
   setCount(it, q);
   lastItem = it; lastAt = Date.now();
   store.logEvent({audit_id: audit.id, art: it.art, mode, n, prev, q, text, source, by_name: me.name});
-  addLog({kind: 'ok', it, prev, q, mode, n, text, source}); lastEvent = {type: 'ok', e: voiceLog[0]};
+  addLog({kind: 'ok', it, prev, q, mode, n, text, source});
   scheduleList();
-  signal(it, q, mode, n);
+  signal(it, q, mode, n, summed);
 }
-function signal(it, q, mode, n){
+function signal(it, q, mode, n, summed){
   const d = q - it.book, short = it.name.split(/[\s,(]+/).slice(0, 3).join(' ');
+  const plus = summed ? `Плюс ${fmtQ(n)}, всего ${fmtQ(q)}. ` : '';
   const box = $('#alert');
   if (d === 0) {
     beep('ok');
     box.className = 'alert good show';
-    box.innerHTML = `<span class="art">${esc(it.art)}</span><span>✓ сходится: ${fmtQ(q)} шт.</span>`;
-    if ($('#speakAll').checked) speak(`${short}. ${mode === 'add' ? 'Плюс ' + fmtQ(n) + '. ' : ''}${fmtQ(q)}, сходится`);
+    box.innerHTML = `<span class="art">${esc(it.art)}</span><span>${summed ? '+' + fmtQ(n) + ' · ' : ''}✓ сходится: ${fmtQ(q)} шт.</span>`;
+    if (summed) speak(`${plus}Сходится.`);
+    else if ($('#speakAll').checked) speak(`${short}. ${mode === 'add' ? 'Плюс ' + fmtQ(n) + '. ' : ''}${fmtQ(q)}, сходится`);
   } else {
     box.className = 'alert bad show';
-    box.innerHTML = `<span class="art">${esc(it.art)}</span><span>НЕ БЬЁТСЯ: по учёту ${fmtQ(it.book)}, посчитано ${fmtQ(q)} (${d > 0 ? '+' : '−'}${fmtQ(Math.abs(d))})</span>`;
-    if ($('#speakBad').checked || $('#speakAll').checked) speak(`Не бьётся. ${short}. По учёту ${fmtQ(it.book)}, посчитано ${fmtQ(q)}.` + (d < 0 ? ' Если есть ещё, скажите: ещё.' : ''));
+    box.innerHTML = `<span class="art">${esc(it.art)}</span><span>${summed ? '+' + fmtQ(n) + ' · ' : ''}НЕ БЬЁТСЯ: по учёту ${fmtQ(it.book)}, посчитано ${fmtQ(q)} (${d > 0 ? '+' : '−'}${fmtQ(Math.abs(d))})</span>`;
+    if ($('#speakBad').checked || $('#speakAll').checked) speak(`${plus}Не бьётся. ${short}. По учёту ${fmtQ(it.book)}, посчитано ${fmtQ(q)}.` + (d < 0 ? ' Если есть ещё, скажите: ещё.' : ''));
+    else if (summed) speak(plus);
   }
   clearTimeout(signal.t); signal.t = setTimeout(() => box.classList.remove('show'), d === 0 ? 4000 : 12000);
 }
@@ -712,6 +721,7 @@ function renderLog(){
     if (e.kind === 'busy') return `<div class="vl busy"><span class="vn">Разбираю: «${esc(e.text)}»…</span></div>`;
     if (e.kind === 'ign') return `<div class="vl ign"><span class="vn">Пропущено как не относящееся к ревизии<small>«${esc(e.text)}»</small></span></div>`;
     const ch = (e.choices || []).map((it, i) => `<button class="btn" type="button" data-pick="${e.id}:${i}">${esc(it.art)} · ${esc(it.name.slice(0, 40))}</button>`).join('');
+    if (e.unkDone) return `<div class="vl ign"><span class="vn">${esc(e.msg)}</span></div>`;
     return `<div class="vl err"><span class="vn">${esc(e.msg)}<small>«${esc(e.text)}»</small></span>${ch ? '<span class="vch">' + ch + '</span>' : ''}</div>`;
   }).join('');
 }
@@ -766,7 +776,7 @@ async function handleOne(text, alts){
     } catch(e) { err = e; }
     voiceLog = voiceLog.filter(x => x !== busy); renderLog();
     if (r && r.ignore) return;
-    const cmds = (r && Array.isArray(r.commands) ? r.commands : []).map(c => ({it: artMap.get(String(c.art).trim()), qty: +c.qty, mode: ['set','add','sub'].includes(c.mode) ? c.mode : 'set'})).filter(c => c.it && isFinite(c.qty) && c.qty >= 0);
+    const cmds = (r && Array.isArray(r.commands) ? r.commands : []).map(c => ({it: artMap.get(String(c.art).trim()), qty: +c.qty, mode: c.mode === 'add' || c.mode === 'sub' ? c.mode : (EXPLICIT_TOTAL.test(lower(text)) ? 'set' : 'auto')})).filter(c => c.it && isFinite(c.qty) && c.qty >= 0);
     if (cmds.length) { for (const c of cmds) applyCmd(c.it, c.mode, c.qty, text, 'ai'); recentTexts.push(text); recentTexts = recentTexts.slice(-3); return; }
     const choices = local.find(c => c.amb)?.amb || cands.slice(0, 4);
     const q1 = local.find(c => c.qty != null);
@@ -781,16 +791,25 @@ async function handleOne(text, alts){
 
 /* ---------- voice commands about the last record ---------- */
 function lastRecord(){ return voiceLog.find(x => x.kind === 'ok' && !x.undone && !x.superseded); }
+function lastAction(){ return voiceLog.find(x => (x.kind === 'ok' && !x.undone && !x.superseded) || (x.unkRow && !x.unkDone)); }
+function unkOf(logE){ return unknowns.find(u => logE.unkId != null && u.id === logE.unkId) || unknowns.find(u => u.text === logE.unkRow.text && !u.resolved) || null; }
+function closeUnknownLog(logE, note, msg){
+  logE.unkDone = true; logE.msg = msg;
+  const u = unkOf(logE);
+  if (u) { u.resolved = true; u.resolved_note = note + ' (' + me.name + ')'; store.resolveUnknown(audit.id, u.id, u.resolved_note).catch(() => {}); }
+  renderLog(); renderStats(); if (filter === 'unk') renderList();
+}
 function voiceCommand(text){
   const t = lower(text).replace(/[.,!?]/g, ' ').replace(/\s+/g, ' ').trim();
   const words = t.split(' ');
-  const last = lastRecord();
+  const last = lastAction();
   // delete / cancel the last record
   const isDelete = /^(отмена|отмени|отменить|отменяй|назад)$/.test(t)
     || (/(^| )(удали|удалить|удаляй|сотри|стереть|сотрите|удалите|отмени|отменить)( |$)/.test(t) && (/последн|запис|это|предыдущ/.test(t) || words.length <= 3))
     || (/(^| )(убери|убрать)( |$)/.test(t) && /последн|запис/.test(t));
   if (isDelete) {
     if (!last) { speak('Нечего удалять'); addLog({kind: 'err', msg: 'Нет записи, которую можно удалить', text}); return true; }
+    if (last.unkRow) { closeUnknownLog(last, 'удалено голосом', 'Удалено голосом: «' + last.unkRow.text + '»'); speak('Удалено. Нераспознанная запись'); return true; }
     undo(last);
     speak(`Удалено. ${last.it.name.split(/[\s,(]+/).slice(0, 3).join(' ')}` + (last.prev != null ? `, вернул ${fmtQ(last.prev)}` : ''));
     return true;
@@ -807,6 +826,13 @@ function voiceCommand(text){
     const n = nums.length ? nums[nums.length - 1] : null;
     if (!last) { speak('Нечего исправлять'); addLog({kind: 'err', msg: 'Нет записи, которую можно исправить', text}); return true; }
     if (n == null || !isFinite(n)) { speak('Скажите, на сколько исправить'); addLog({kind: 'err', msg: 'Не услышал число для исправления', text}); return true; }
+    if (last.unkRow) {
+      last.unkRow.qty = n; last.qty = n; last.msg = `Нераспознанная запись: количество исправлено на ${fmtQ(n)}`;
+      const u = unkOf(last); if (u) { u.qty = n; store.updateUnknown(audit.id, u.id, {qty: n}).catch(() => {}); }
+      renderLog(); if (filter === 'unk') renderList();
+      speak(`Исправлено на ${fmtQ(n)}. Запись осталась в нераспознанных. Скажите правильный артикул: исправь артикул на…`);
+      return true;
+    }
     // fix means: the last record should have been N instead of what was said
     const it = last.it, cur = counts.get(it.key), curQ = cur && cur.q != null ? cur.q : 0;
     const target = last.mode === 'add' ? Math.max(0, curQ - last.n + n) : last.mode === 'sub' ? Math.max(0, curQ + last.n - n) : n;
@@ -821,15 +847,13 @@ function voiceCommand(text){
 
 function fixArticle(it, qtyOverride, text){
   // the last thing said was not in stock -> move it to the right article
-  if (lastEvent && lastEvent.type === 'unk') {
-    const {row, log} = lastEvent;
+  const lastA = lastAction();
+  if (lastA && lastA.unkRow) {
+    const row = lastA.unkRow;
     const qty = qtyOverride != null ? qtyOverride : row.qty;
-    const u = unknowns.find(x => x.text === row.text && !x.resolved) || null;
-    if (u) { u.resolved = true; u.resolved_note = 'исправлено голосом на ' + it.art + ' (' + me.name + ')'; store.resolveUnknown(audit.id, u.id, u.resolved_note).catch(() => {}); }
-    voiceLog = voiceLog.filter(x => x !== log);
-    renderStats(); if (filter === 'unk') renderList();
+    closeUnknownLog(lastA, 'исправлено голосом на ' + it.art, 'Исправлено на ' + it.art + ': «' + row.text + '»');
     if (qty == null) { speak(`Артикул ${sayArt(it.art)}. Сколько штук?`); addLog({kind: 'err', msg: `Артикул исправлен на ${it.art}, но количество не было названо — скажите его`, text}); lastItem = it; lastAt = Date.now(); return true; }
-    applyCmd(it, row.mode || 'set', qty, text, 'fix');
+    applyCmd(it, row.mode || 'auto', qty, text, 'fix');
     if (status(it).st === 'ok' || !$('#speakBad').checked) speak(`Исправлено на ${sayArt(it.art)}. ${fmtQ(qty)}`);
     return true;
   }
@@ -839,7 +863,7 @@ function fixArticle(it, qtyOverride, text){
   if (last.it === it) { speak('Это тот же артикул'); return true; }
   const qty = qtyOverride != null ? qtyOverride : last.n;
   undo(last);
-  applyCmd(it, last.mode === 'sub' ? 'sub' : last.mode, qty, text, 'fix');
+  applyCmd(it, last.mode === 'sub' ? 'sub' : 'auto', qty, text, 'fix');
   if (status(it).st === 'ok' || !$('#speakBad').checked) speak(`Перенёс на ${sayArt(it.art)}. ${fmtQ(qty)}`);
   return true;
 }
@@ -853,13 +877,13 @@ function guessArt(local){
 function guessQty(local){ const nums = local.flatMap(c => c.nums || []); return nums.length >= 4 ? +nums[3] : nums.length === 1 || nums.length === 3 ? +nums[nums.length - 1] : null; }
 const sayArt = a => String(a || '').split('/').join(' ');
 async function recordUnknown(text, art, qty, mode, reason, choices){
-  const row = {audit_id: audit.id, text, art: art || null, qty: qty != null && isFinite(qty) ? qty : null, mode: mode || 'set', reason, by_name: me.name};
+  const row = {audit_id: audit.id, text, art: art || null, qty: qty != null && isFinite(qty) ? qty : null, mode: mode || 'auto', reason, by_name: me.name};
   const notInStock = reason === 'нет в остатках';
   speak(notInStock ? `Артикула ${sayArt(art)} нет в остатках. Записал в нераспознанные.` : 'Артикул не распознан. Записал в нераспознанные.');
   const box = $('#alert'); box.className = 'alert bad show';
   box.innerHTML = `<span>${notInStock ? 'Нет в остатках: <span class="art">' + esc(art) + '</span>' : 'Не распознан артикул'}${row.qty != null ? ' · ' + fmtQ(row.qty) + ' шт.' : ''} — записано в «Нераспознанные»</span>`;
   clearTimeout(signal.t); signal.t = setTimeout(() => box.classList.remove('show'), 10000);
-  const logE = {kind: 'err', msg: (notInStock ? 'Нет в остатках — записано в «Нераспознанные»' : 'Не распознан — записано в «Нераспознанные»') , text, choices: [], qty: row.qty, mode: row.mode}; addLog(logE); lastEvent = {type: 'unk', log: logE, row};
+  const logE = {kind: 'err', msg: (notInStock ? 'Нет в остатках — записано в «Нераспознанные»' : 'Не распознан — записано в «Нераспознанные»') , text, choices: [], qty: row.qty, mode: row.mode}; logE.unkRow = row; addLog(logE);
   try { const saved = await store.addUnknown(row); logE.unkId = saved.id; if (!unknowns.some(u => u.id === saved.id)) unknowns.push(saved); }
   catch(e) { unknowns.push(Object.assign({id: 'tmp' + Date.now(), at: new Date().toISOString(), resolved: false}, row)); toast('Нераспознанное не сохранилось в базе: ' + (e.message || e)); }
   renderStats(); if (filter === 'unk') renderList();

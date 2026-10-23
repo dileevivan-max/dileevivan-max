@@ -570,7 +570,7 @@ async function renderPlan(){
     const ordered=ids.map(id=>byId[id]);const sch=scheduleFixed(m,ordered);
     visits+=ids.length;kmSum+=sch.km;const isOver=!sch.far&&ids.length&&sch.end>end;if(isOver)over++;
     const dists=[...new Set(ordered.map(p=>p.district))];
-    const links=yandexLinks(m,ordered);
+    const links=gisLinks(m,ordered);
     html.push(`<article class="day${isOver?' over':''}${sch.far?' far':''}" data-day="${k}">
       <div class="dayhead"><div class="d1"><h3>${esc(dayLabel(k))}</h3><span class="end${isOver?' bad':''}">${ids.length?fmt(sch.end):'—'}</span></div>
       <div class="meta"><span>${ids.length} ТТ</span>${ids.length?`<span>выезд ${fmt(sch.depart)}</span><span>${sch.km.toFixed(0)} км по маршруту</span>`:'<span>свободный день</span>'}${sch.far?'<span class="pill warn">дальний выезд</span>':''}</div>
@@ -580,7 +580,7 @@ async function renderPlan(){
       ${canEdit()?`<td><select data-move="${r.p.id}" data-from="${k}" aria-label="Перенести на другой день"><option value="">—</option>${allDates.filter(x=>x!==k).map(x=>`<option value="${x}">${parseKey(x).getDate()} ${WD[parseKey(x).getDay()]}</option>`).join('')}</select></td>
       <td><button class="btn small" data-remove="${r.p.id}" data-from="${k}" title="Убрать из дня">✕</button></td>`:''}</tr>`).join('')}
       </tbody></table></div>`:''}
-      <div class="dayfoot">${links.map((u,i)=>`<a href="${u}" target="_blank" rel="noopener">Яндекс Карты${links.length>1?' '+(i+1):''}</a>`).join('')}
+      <div class="dayfoot">${links.map((u,i)=>`<a href="${u}" target="_blank" rel="noopener">2ГИС${links.length>1?' — часть '+(i+1):''}</a>`).join('')}
         <span class="grow"></span>${canEdit()?`
         <select data-add="${k}" aria-label="Добавить точку в день"><option value="">+ точку…</option>${mgrPoints(m).filter(p=>p.status==='active'&&!ids.includes(p.id)).sort((a,b)=>a.district.localeCompare(b.district)||a.name.localeCompare(b.name)).map(p=>`<option value="${p.id}">${esc(p.district)}: ${esc(p.name)}</option>`).join('')}</select>
         ${ids.length>1?`<button class="btn small" data-reopt="${k}">Пересчитать порядок</button>`:''}
@@ -608,11 +608,13 @@ function scheduleFixed(m,ordered){
   const depart=tmin(st.arrive)-km(start,ordered[0])/sp*60;
   return {rows,km:total,end:t,depart,far};
 }
-function yandexLinks(m,ordered){
-  const pts=[{lat:m.start.lat,lng:m.start.lng},...ordered];const out=[];
-  for(let s=0;s<pts.length-1;s+=8){const ch=pts.slice(s,s+9);out.push('https://yandex.kz/maps/?rtt=auto&rtext='+ch.map(p=>p.lat.toFixed(6)+','+p.lng.toFixed(6)).join('~'))}
+function gisLinks(m,ordered){
+  /* 2ГИС: не больше 10 точек в одной ссылке — делим маршрут на части с перекрытием */
+  const pts=[];[{lat:m.start.lat,lng:m.start.lng},...ordered].forEach(p=>{const l=pts[pts.length-1];if(p.lat==null||p.lng==null)return;if(!l||Math.abs(l.lat-p.lat)>1e-5||Math.abs(l.lng-p.lng)>1e-5)pts.push(p)});const out=[];
+  for(let s=0;s<pts.length-1;s+=9){const ch=pts.slice(s,s+10);out.push('https://2gis.kz/almaty/directions/points/'+ch.map(p=>p.lng.toFixed(6)+'%2C'+p.lat.toFixed(6)).join('%7C')+'/tab/car')}
   return out;
 }
+function gisTo(p){return 'https://2gis.kz/almaty/directions/points/%7C'+p.lng.toFixed(6)+'%2C'+p.lat.toFixed(6)+'/tab/car'}
 function countVisits(plan){const c={};for(const ids of Object.values(plan.days))for(const id of ids)c[id]=(c[id]||0)+1;return c}
 function renderFreq(plan){
   const m=mgr(),c=countVisits(plan);const rows=mgrPoints(m).slice().sort((a,b)=>{const da=(c[a.id]||0)-(a.status==='active'?freqOf(a):0),db=(c[b.id]||0)-(b.status==='active'?freqOf(b):0);return Math.abs(db)-Math.abs(da)||a.district.localeCompare(b.district)});
@@ -715,7 +717,7 @@ function exportExcel(){
     if(!ordered.length){aoa.push([]);continue}
     aoa.push(['№','Клиент','Район','Пункт','Адрес','Категория','Прибытие','Убытие','Км от пред.']);
     sch.rows.forEach((r,i)=>aoa.push([i+1,r.p.name,r.p.district,r.p.locality||'',r.p.address,r.p.category,fmt(r.arr),fmt(r.dep),i?Number(r.km.toFixed(1)):'']));
-    yandexLinks(m,ordered).forEach((u,i)=>aoa.push(['','Яндекс Карты'+(i?' '+(i+1):''),u]));
+    gisLinks(m,ordered).forEach((u,i)=>aoa.push(['','2ГИС'+(i?' — часть '+(i+1):''),u]));
     aoa.push([]);
   }
   const ws=XLSX.utils.aoa_to_sheet(aoa);ws['!cols']=[{wch:5},{wch:32},{wch:20},{wch:18},{wch:36},{wch:9},{wch:9},{wch:9},{wch:10}];
@@ -891,14 +893,14 @@ function renderToday(){
   const done=ordered.filter(p=>vm[T.date+'|'+p.id]).length;
   const remaining=ordered.filter(p=>!vm[T.date+'|'+p.id]);
   const start=fromHere?T.here:m.start;
-  const nav=remaining.length?yandexLinks({start},remaining):[];
+  const nav=remaining.length?gisLinks({start},remaining):[];
   $('tBody').innerHTML=`<div class="dayhero"><h2>${esc(dayLabel(T.date))}</h2><span class="muted">${ids.length} ТТ · отмечено ${done} · ${fromHere?'маршрут от вашего места':'выезд '+fmt(sch.depart)+' · конец ≈ '+fmt(sch.end)}</span></div>
-   <div class="bar"><button class="btn primary" id="tRoute">Построить маршрут от моего места</button>${nav.map((u,i)=>`<a class="btn" href="${u}" target="_blank" rel="noopener">Навигатор${nav.length>1?' '+(i+1):''}</a>`).join('')}<span class="muted" id="tRouteMsg"></span></div>
+   <div class="bar"><button class="btn primary" id="tRoute">Построить маршрут от моего места</button>${nav.map((u,i)=>`<a class="btn" href="${u}" target="_blank" rel="noopener">Открыть в 2ГИС${nav.length>1?' — часть '+(i+1):''}</a>`).join('')}<span class="muted" id="tRouteMsg"></span></div>
    <div class="stops">${sch.rows.map((r,i)=>{const p=r.p,v=vm[T.date+'|'+p.id];return `<div class="stop ${p.category==='A'||p.category==='AAA'?'cA':p.category==='B'?'cB':''} ${v&&v.status!=='missed'?'done':''}">
      <div class="h"><span class="n">${i+1}</span><b>${esc(p.name)}</b><span class="cat">${esc(p.category)}</span><span class="tm">${r.arr!==null&&r.arr!==undefined?fmt(r.arr):''}</span></div>
      <div class="muted">${esc(p.district)}${p.locality&&p.locality!==p.district?' / '+esc(p.locality):''} · ${esc(p.address)}</div>
      <div class="acts">${v?vsPill(v)+` <button class="btn small" data-vundo="${p.id}">Отменить</button>`:`<button class="btn small primary" data-vdone="${p.id}">Был</button><button class="btn small" data-vmove="${p.id}">Не успел — перенести</button><button class="btn small danger" data-vclosed="${p.id}">Точка закрыта</button>`}
-       <a class="btn small" href="https://yandex.kz/maps/?rtext=~${p.lat},${p.lng}&rtt=auto" target="_blank" rel="noopener">Ехать</a></div></div>`}).join('')}</div>`;
+       <a class="btn small" href="${gisTo(p)}" target="_blank" rel="noopener">Ехать</a></div></div>`}).join('')}</div>`;
   $('tRoute').onclick=routeFromHere;
 }
 function ymName(ym){const [y,m]=ym.split('-').map(Number);return ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'][m-1]+' '+y}

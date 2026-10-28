@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<!-- версия 2026-10-23b -->
+<!-- версия 2026-10-28 -->
 <meta name="theme-color" content="#2c5b4e">
 <title>Ревизия запчастей МСЦ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -189,6 +189,11 @@ h1{font-family:var(--f-display);font-weight:600;font-size:22px;letter-spacing:.0
 .login .err{color:var(--short);font-size:13px}
 .demo-banner{background:var(--over-soft);color:var(--ink);font-size:13px;padding:8px 12px;border-radius:8px}
 .hist{display:grid;gap:6px}
+.row.rec{background:var(--over-soft)}
+.row.rec .rec-name{margin-top:6px;width:100%;max-width:360px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+.row.rec .recq{display:flex;justify-content:flex-end}
+.row.rec .rec-qty{width:84px;text-align:right;font-family:var(--f-mono);font-size:16px;padding:6px 8px;border:1.5px solid var(--accent);border-radius:6px;background:var(--surface)}
+@media (max-width:720px){.row.rec .recq{grid-area:fact}.row.rec .diff{grid-area:diff}}
 .head-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
 .topfin{padding:6px 12px;font-size:13px;font-weight:600}
 .modal{position:fixed;inset:0;z-index:30;background:color-mix(in srgb,var(--ink) 45%,transparent);display:grid;place-items:center;padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
@@ -255,7 +260,7 @@ h1{font-family:var(--f-display);font-weight:600;font-size:22px;letter-spacing:.0
 
   <div class="toolbar">
     <div class="typed" style="flex:1 1 280px">
-      <input id="q" type="search" autocomplete="off" spellcheck="false" placeholder="Поиск: артикул или название" aria-label="Поиск">
+      <input id="q" type="search" autocomplete="off" spellcheck="false" placeholder="Артикул без 61/ — например 21/652 — или название" aria-label="Поиск">
     </div>
     <div class="chips" id="chips" role="group" aria-label="Фильтр"></div>
     <select id="cat" aria-label="Категория"><option value="">Все категории</option></select>
@@ -412,7 +417,7 @@ const store = CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY && window.supabase
 
 /* ---------- stock & counts ---------- */
 function setStock(list){
-  items = list.map(r => ({key: r.art, art: r.art, name: r.name, cat: r.cat || '', book: +r.book || 0, price: +r.price || 0, extra: false, sArt: compact(r.art), sAll: lower(r.art + ' ' + r.name)}));
+  items = list.map(r => ({key: r.art, art: r.art, name: r.name, cat: r.cat || '', book: +r.book || 0, price: +r.price || 0, extra: false, sArt: compact(r.art), sAll: lower(r.art + ' ' + r.name + ' ' + (r.cat || ''))}));
   byKey = new Map(items.map(i => [i.key, i])); rowEls.clear();
   const cats = [...new Set(items.map(i => i.cat).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
   $('#cat').innerHTML = '<option value="">Все категории</option>' + cats.map(c => `<option>${esc(c)}</option>`).join('');
@@ -443,11 +448,43 @@ function matches(it){
   if (filter === 'diff' && !(s === 'short' || s === 'over')) return false;
   if (filter === 'extra' && !it.extra) return false;
   if (!query) return true;
-  const qc = compact(query);
-  if (qc && it.sArt.includes(qc)) return true;
+  const aq = artQuery(query);
+  if (aq) return artMatch(it, aq) > 0;
   return lower(query).split(/\s+/).filter(Boolean).every(t => it.sAll.includes(t));
 }
-function rank(it){ if (!query) return 0; const qc = compact(query); return it.sArt === qc ? 0 : it.sArt.startsWith(qc) ? 1 : it.sArt.includes(qc) ? 2 : 3; }
+/* Article search: every part starts with 61/, so it may be left out.
+   "21/652", "21 652", "21-652", "61/21/652" and "21652" all mean 61/21/652. */
+let aqCache = {q: null, v: null};
+function artQuery(q){
+  if (aqCache.q === q) return aqCache.v;
+  let v = null;
+  const t = String(q).trim();
+  if (/^[\d\s\/\\.,\-]+$/.test(t) && /\d/.test(t)) {
+    const parts = t.split(/[^\d]+/).filter(Boolean).map(x => String(+x));
+    if (parts.length >= 3) v = {segs: parts.slice(0, 3), full: parts.slice(0, 3).join('/')};
+    else if (parts.length === 2) v = parts[0] === '61' && !artMap.has('61/61/' + parts[1])
+      ? {segs: ['61', parts[1]], full: null}                 // still typing "61/21…"
+      : {segs: ['61', parts[0], parts[1]], full: '61/' + parts.join('/')};
+    else v = {digits: parts[0]};                              // one run of digits: "21652" or "652"
+  }
+  aqCache = {q, v}; return v;
+}
+// 3 = exact article, 2 = the article starts with what was typed, 0 = no match (no "similar" guesses)
+function artMatch(it, aq){
+  const a = it.art.split('/');
+  if (aq.segs) {
+    const k = aq.segs.length - 1;
+    for (let i = 0; i < k; i++) if (a[i] !== aq.segs[i]) return 0;
+    if (a[k] === aq.segs[k] && a.length === aq.segs.length) return 3;
+    if (!aq.full && a[k] && a[k].startsWith(aq.segs[k])) return 2;
+    return 0;
+  }
+  const d = aq.digits, tail = it.sArt.startsWith('61') ? it.sArt.slice(2) : it.sArt;
+  if (tail === d || it.sArt === d) return 3;
+  if (tail.startsWith(d) || it.sArt.startsWith(d) || (a[2] && a[2] === d)) return 2;
+  return 0;
+}
+function rank(it){ if (!query) return 0; const aq = artQuery(query); if (aq) return 3 - artMatch(it, aq); const qc = compact(query); return it.sArt === qc ? 0 : it.sArt.startsWith(qc) ? 1 : 2; }
 function renderStats(){
   let total = 0, done = 0, ok = 0, sh = 0, ov = 0, shSum = 0, ovSum = 0, ex = 0;
   for (const it of items) {
@@ -497,16 +534,35 @@ function renderList(){
   if (filter === 'unk') { renderUnknowns(); return; }
   // newest counted first, then the rest in stock-file order; when searching, best match first
   const tOf = it => { const c = counts.get(it.key); return c && c.q != null ? (c.t || 0) : 0; };
-  const rows = items.filter(matches);
+  if (!artMap.size && items.length) rebuildArtMap();
+  let rows = items.filter(matches);
   if (query) rows.sort((a, b) => rank(a) - rank(b) || tOf(b) - tOf(a)); else rows.sort((a, b) => tOf(b) - tOf(a));
+  const aq = query ? artQuery(query) : null;
+  let recArt = null;
+  if (aq) {
+    const exact = items.find(it => artMatch(it, aq) === 3);
+    if (exact) rows = matches(exact) ? [exact] : [];
+    else if (aq.full) { rows = []; recArt = aq.full; }  // a full article that is not in stock: no look-alikes
+  }
   const frag = document.createDocumentFragment();
   const hdr = document.createElement('div'); hdr.className = 'row hdr';
   hdr.innerHTML = '<div>Артикул</div><div>Наименование</div><div class="r">Учёт</div><div class="r">Факт</div><div class="r">Разница</div>';
   frag.appendChild(hdr);
   for (const it of rows.slice(0, shown)) frag.appendChild(rowEls.get(it.key) || buildRow(it));
   if (rows.length > shown) { const m = document.createElement('div'); m.className = 'more'; m.innerHTML = `<button class="btn" type="button" id="moreBtn">Показать ещё (${rows.length - shown})</button>`; frag.appendChild(m); }
+  if (recArt && items.length) {
+    const r = document.createElement('div'); r.className = 'row rec'; r.dataset.art = recArt;
+    r.innerHTML = `<div class="art">${esc(recArt)}</div>
+      <div class="name"><span class="n">Такого артикула нет в остатках</span><span class="meta">Запишется как указано, в «Сверх учёта». Название — по желанию.</span>
+        <input type="text" class="rec-name" placeholder="Название (необязательно)" aria-label="Название запчасти"></div>
+      <div class="book num">0</div>
+      <div class="recq"><input type="text" inputmode="decimal" class="rec-qty" placeholder="Кол-во" aria-label="Количество"></div>
+      <div class="diff"><button class="btn primary" type="button" data-rec>Записать</button></div>`;
+    frag.appendChild(r);
+  }
+  else if (aq && aq.digits && !rows.length && items.length) { const e = document.createElement('div'); e.className = 'empty'; e.textContent = 'Нет артикула, начинающегося так. Если артикула нет в остатках, введите его с разделителем, например 52/308, — его можно будет записать как указано.'; frag.appendChild(e); }
   if (!items.length) { const e = document.createElement('div'); e.className = 'empty-audit'; e.innerHTML = '<b>Активной ревизии нет.</b><span>Загрузите выгрузку остатков из 1С в разделе «Ревизия и остатки» ниже.</span>'; frag.appendChild(e); $('#panel').open = true; }
-  else if (!rows.length) { const e = document.createElement('div'); e.className = 'empty'; e.textContent = 'Ничего не найдено по текущему фильтру.'; frag.appendChild(e); }
+  else if (!rows.length && !recArt && !(aq && aq.digits)) { const e = document.createElement('div'); e.className = 'empty'; e.textContent = 'Ничего не найдено по текущему фильтру.'; frag.appendChild(e); }
   $('#list').replaceChildren(frag);
 }
 function renderAll(){ renderStats(); for (const it of items) updateRow(it); renderList(); renderAuditInfo(); }
@@ -1244,7 +1300,7 @@ $('#history').addEventListener('click', async e => {
 let qT;
 $('#q').addEventListener('input', e => { clearTimeout(qT); qT = setTimeout(() => { query = e.target.value.trim(); shown = PAGE; renderList(); }, 80); });
 $('#q').addEventListener('keydown', e => {
-  if (e.key === 'Enter') { e.preventDefault(); query = e.target.value.trim(); renderList(); const f = $('#list .row:not(.hdr) input'); if (f) { f.focus(); f.select(); } }
+  if (e.key === 'Enter') { e.preventDefault(); clearTimeout(qT); query = e.target.value.trim(); shown = PAGE; renderList(); const f = $('#list .row.rec .rec-qty') || $('#list .row:not(.hdr):not(.unk) .fact input'); if (f) { f.focus(); f.select(); } }
   else if (e.key === 'Escape') { e.target.value = ''; query = ''; renderList(); }
 });
 $('#chips').addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; filter = b.dataset.f; shown = PAGE; renderStats(); renderList(); });
@@ -1253,7 +1309,22 @@ $('#list').addEventListener('click', e => {
   if (e.target.id === 'moreBtn') { shown += PAGE * 2; renderList(); return; }
   if (e.target.classList.contains('x')) { const it = byKey.get(e.target.closest('.row').dataset.key); if (!it) return; persist(it.key, null); syncExtras(); renderAll(); toast(`Подсчёт ${it.art} сброшен`); }
 });
+function recordTyped(row){
+  const art = row.dataset.art, raw = row.querySelector('.rec-qty').value.trim().replace(',', '.');
+  const q = parseFloat(raw);
+  if (!isFinite(q) || q < 0) { toast('Введите количество'); row.querySelector('.rec-qty').focus(); return; }
+  const name = row.querySelector('.rec-name').value.trim();
+  const cur = counts.get(art);
+  const nq = cur && cur.q != null ? Math.round((cur.q + q) * 1000) / 1000 : q;
+  persist(art, {q: nq, b: 0, adj: 0, x: true, name: name || (cur && cur.name) || '', by: me.name, t: Date.now()});
+  store.logEvent({audit_id: audit.id, art, mode: cur ? 'add' : 'set', n: q, prev: cur ? cur.q : null, q: nq, text: 'вручную, нет в остатках', source: 'manual', by_name: me.name});
+  syncExtras(); renderStats();
+  toast(`${art} записан: ${fmtQ(nq)} шт. (сверх учёта)`);
+  $('#q').value = ''; query = ''; renderList(); $('#q').focus();
+}
+$('#list').addEventListener('click', e => { const b = e.target.closest('[data-rec]'); if (b) recordTyped(b.closest('.row.rec')); });
 $('#list').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.closest('.row.rec')) { e.preventDefault(); const row = e.target.closest('.row.rec'); if (e.target.classList.contains('rec-name')) row.querySelector('.rec-qty').focus(); else recordTyped(row); return; }
   if (e.target.tagName !== 'INPUT' || !e.target.closest('.fact')) return;
   if (e.key === 'Enter') { e.preventDefault(); const it = byKey.get(e.target.closest('.row').dataset.key);
     if (commitTyped(it, e.target.value)) { e.target.dataset.done = '1'; $('#q').value = ''; query = ''; $('#q').focus(); renderList(); } }

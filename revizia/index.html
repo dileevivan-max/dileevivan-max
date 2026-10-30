@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<!-- версия 2026-10-28 -->
+<!-- версия 2026-10-30 whisper -->
 <meta name="theme-color" content="#2c5b4e">
 <title>Ревизия запчастей МСЦ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -189,6 +189,9 @@ h1{font-family:var(--f-display);font-weight:600;font-size:22px;letter-spacing:.0
 .login .err{color:var(--short);font-size:13px}
 .demo-banner{background:var(--over-soft);color:var(--ink);font-size:13px;padding:8px 12px;border-radius:8px}
 .hist{display:grid;gap:6px}
+.lvl{display:block;height:4px;width:160px;max-width:100%;background:var(--surface-2);border-radius:2px;overflow:hidden}
+.lvl i{display:block;height:100%;width:0;background:var(--ok);transition:width .08s linear}
+.vopts select{border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:3px 6px}
 .row.rec{background:var(--over-soft)}
 .row.rec .rec-name{margin-top:6px;width:100%;max-width:360px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
 .row.rec .recq{display:flex;justify-content:flex-end}
@@ -240,6 +243,7 @@ h1{font-family:var(--f-display);font-weight:600;font-size:22px;letter-spacing:.0
       <button class="bigmic" id="micBtn" type="button" aria-label="Включить микрофон"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg></button>
       <div class="caption">
         <span class="st" id="micState">Нажмите микрофон, чтобы начать</span>
+        <span class="lvl" aria-hidden="true"><i id="lvl"></i></span>
         <span class="heard" id="heard">Говорите: «61 21 652 — три штуки» (повтор артикула прибавит), «всего 5» — перезаписать, «исправь последнее на 5», «исправь артикул на 52 303», «удали последнюю запись»</span>
       </div>
     </div>
@@ -252,6 +256,7 @@ h1{font-family:var(--f-display);font-weight:600;font-size:22px;letter-spacing:.0
   <div class="vopts">
     <label><input type="checkbox" id="speakAll"> Озвучивать каждую запись</label>
     <label><input type="checkbox" id="speakBad" checked> Голосом сообщать о расхождении</label>
+    <label>Распознавание: <select id="engine" aria-label="Распознавание речи"><option value="whisper">ИИ Whisper — точнее</option><option value="chrome">Chrome — быстрее</option></select></label>
     <label><input type="checkbox" id="useAI" checked> ИИ-разбор непонятных фраз</label>
     <button class="btn" type="button" id="testVoiceBtn" style="padding:4px 10px;font-size:13px">Проверить голос</button>
     <span id="aiState" class="hint"></span>
@@ -349,6 +354,7 @@ const LocalStore = {
   async newAudit(title, stock, fname){ const a = {id: 'L' + Date.now(), title, created_at: new Date().toISOString(), stock, stock_ver: String(Date.now()), stock_at: new Date().toISOString(), stock_file: fname}; lsSet('rv-audit', a); return a; },
   async updateStock(a, stock, fname){ const n = Object.assign({}, a, {stock, stock_ver: String(Date.now()), stock_at: new Date().toISOString(), stock_file: fname}); lsSet('rv-audit', n); return n; },
   async ai(){ return null; },
+  async transcribe(){ throw {code: 'unavailable', message: 'Whisper работает только с подключённой базой'}; },
   async logout(){},
   async finishAudit(a, by){ const h = lsGet('rv-history', []); h.unshift(Object.assign({}, a, {active: false, finished_at: new Date().toISOString(), finished_by: by})); lsSet('rv-history', h.slice(0, 20)); lsSet('rv-hcounts-' + a.id, lsGet('rv-counts-' + a.id, {})); try { localStorage.removeItem('rv-audit'); } catch(e) {} },
   async listAudits(){ return lsGet('rv-history', []); },
@@ -410,6 +416,11 @@ const SbStore = {
   async ai(payload){
     const {data, error} = await this.sb.functions.invoke(CONFIG.AI_FUNCTION, {body: payload});
     if (error) throw error; return data;
+  },
+  async transcribe(audio, mime){
+    const {data, error} = await this.sb.functions.invoke('transcribe', {body: {audio, mime}});
+    if (error) { const st = error.context && error.context.status; throw {code: st === 429 ? 'rate_limited' : st === 401 ? 'login' : 'failed', message: error.message}; }
+    return data;
   }
 };
 function fromRow(r){ return {q: r.q == null ? null : +r.q, b: r.b == null ? null : +r.b, adj: +r.adj || 0, x: !!r.x, name: r.name, price: r.price == null ? 0 : +r.price, by: r.by_name, t: Date.parse(r.updated_at)}; }
@@ -1002,10 +1013,13 @@ function micUI(state, text){
   b.setAttribute('aria-label', state === 'off' ? 'Включить микрофон' : 'Выключить микрофон');
   $('#micState').textContent = text;
 }
+let engine = 'chrome';
 function startRec(){
   if (!listening || speaking) return;
+  if (engine === 'whisper') { WH.resume(); micUI('on', 'Слушаю (ИИ Whisper)… называйте артикул и количество'); return; }
   try { rec.start(); } catch(e) {}
 }
+function pauseRec(){ if (engine === 'whisper') WH.pause(); else { try { rec && rec.abort(); } catch(e) {} } }
 function makeRec(){
   rec = new SR(); rec.lang = 'ru-RU'; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 3;
   rec.onstart = () => micUI('on', 'Слушаю… называйте артикул и количество');
@@ -1025,23 +1039,132 @@ function makeRec(){
     if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') { stopListening(); toast('Нет доступа к микрофону. Разрешите микрофон для этого сайта в настройках браузера.'); }
     else if (ev.error === 'audio-capture') { stopListening(); toast('Микрофон не найден'); }
   };
-  rec.onend = () => { clearTimeout(restartT); if (listening && !speaking) restartT = setTimeout(startRec, 200); else if (!listening) micUI('off', 'Микрофон выключен'); };
+  rec.onend = () => { clearTimeout(restartT); if (engine !== 'chrome') return; if (listening && !speaking) restartT = setTimeout(startRec, 200); else if (!listening) micUI('off', 'Микрофон выключен'); };
 }
 async function startListening(){
-  if (!SR) { toast('Этот браузер не умеет распознавать речь. Откройте страницу в Google Chrome.'); return; }
   if (!audit || !items.length) { toast('Сначала загрузите остатки и начните ревизию'); $('#panel').open = true; return; }
+  if (engine === 'whisper' && !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) { toast('Браузер не даёт доступ к микрофону — переключаюсь на Chrome'); setEngine('chrome'); }
+  if (engine === 'chrome' && !SR) { toast('Этот браузер не умеет распознавать речь сам. Выберите «ИИ Whisper».'); return; }
   try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch(e) {}
   unlockTTS('Слушаю');
-  listening = true; if (!rec) makeRec();
-  micUI('on', 'Включаю микрофон…'); startRec();
+  listening = true;
+  micUI('on', 'Включаю микрофон…');
+  if (engine === 'whisper') {
+    try { await WH.start(); }
+    catch(e) { listening = false; micUI('off', 'Микрофон выключен'); toast('Нет доступа к микрофону. Разрешите микрофон для этого сайта в настройках браузера.'); return; }
+    startRec();
+  } else { if (!rec) makeRec(); startRec(); }
   try { wake = await navigator.wakeLock.request('screen'); } catch(e) {}
 }
 function stopListening(){
   listening = false; clearTimeout(restartT);
   try { rec && rec.abort(); } catch(e) {}
+  WH.stop();
   micUI('off', 'Микрофон выключен');
   try { wake && wake.release(); } catch(e) {} wake = null;
 }
+/* ---------- ИИ Whisper: own microphone, phrases cut by pauses, sent to Groq Whisper ---------- */
+const WH = {
+  stream: null, ctx: null, src: null, proc: null, active: false, paused: false,
+  ring: [], ringMs: 0, seg: null, segMs: 0, voicedMs: 0, silenceMs: 0, onsetMs: 0, floor: 0.004, lvlT: 0,
+  async start(){
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();   // created inside the tap (iPhone)
+    try { await this.ctx.resume(); } catch(e) {}
+    this.stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1}});
+    this.src = this.ctx.createMediaStreamSource(this.stream);
+    this.proc = this.ctx.createScriptProcessor(2048, 1, 1);
+    this.proc.onaudioprocess = e => this.onAudio(e.inputBuffer.getChannelData(0));
+    this.src.connect(this.proc); this.proc.connect(this.ctx.destination);   // output stays silent
+    this.active = true; this.paused = false; this.reset();
+  },
+  reset(){ this.ring = []; this.ringMs = 0; this.seg = null; this.segMs = 0; this.voicedMs = 0; this.silenceMs = 0; this.onsetMs = 0; },
+  onAudio(input){
+    if (!this.active) return;
+    const data = new Float32Array(input), ms = data.length / this.ctx.sampleRate * 1000;
+    let sum = 0; for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+    const rms = Math.sqrt(sum / data.length);
+    const now = performance.now(); if (now - this.lvlT > 90) { this.lvlT = now; const l = $('#lvl'); if (l) l.style.width = Math.min(100, rms * 900) + '%'; }
+    if (this.paused) { this.reset(); return; }
+    const thr = Math.max(0.012, this.floor * 3.2);
+    if (!this.seg) {
+      if (rms < thr) this.floor = this.floor * 0.97 + rms * 0.03;
+      this.ring.push(data); this.ringMs += ms;
+      while (this.ringMs > 450 && this.ring.length > 1) { const d = this.ring.shift(); this.ringMs -= d.length / this.ctx.sampleRate * 1000; }
+      if (rms > thr) { this.onsetMs += ms; if (this.onsetMs >= 120) { this.seg = this.ring.slice(); this.segMs = this.ringMs; this.voicedMs = this.onsetMs; this.silenceMs = 0; } }
+      else this.onsetMs = 0;
+    } else {
+      this.seg.push(data); this.segMs += ms;
+      if (rms > thr * 0.75) { this.silenceMs = 0; this.voicedMs += ms; } else this.silenceMs += ms;
+      if (this.silenceMs >= 850 || this.segMs >= 15000) this.finish();
+    }
+  },
+  finish(){
+    const seg = this.seg, voiced = this.voicedMs, rate = this.ctx.sampleRate; this.reset();
+    if (!seg || voiced < 300) return;
+    sendClip(encodeWav(seg, rate, 16000));
+  },
+  pause(){ if (this.seg && this.voicedMs >= 300) this.finish(); this.paused = true; this.reset(); },
+  resume(){ this.paused = false; },
+  stop(){
+    this.active = false; this.reset();
+    try { this.proc && this.proc.disconnect(); this.src && this.src.disconnect(); } catch(e) {}
+    try { this.stream && this.stream.getTracks().forEach(t => t.stop()); } catch(e) {}
+    try { this.ctx && this.ctx.close(); } catch(e) {}
+    this.proc = this.src = this.stream = this.ctx = null;
+    const l = $('#lvl'); if (l) l.style.width = '0';
+  }
+};
+function encodeWav(chunks, rate, outRate){
+  let n = 0; for (const c of chunks) n += c.length;
+  const all = new Float32Array(n); let o = 0; for (const c of chunks) { all.set(c, o); o += c.length; }
+  const ratio = rate / outRate, len = Math.floor(n / ratio), pcm = new Int16Array(len);
+  let peak = 0; for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(all[i]));
+  const gain = peak > 0 && peak < 0.5 ? Math.min(4, 0.7 / peak) : 1;   // quiet speaker: lift the level a little
+  for (let i = 0; i < len; i++) {
+    const a = Math.floor(i * ratio), b = Math.min(n, Math.floor((i + 1) * ratio)); let v = 0;
+    for (let j = a; j < b; j++) v += all[j]; v = (v / Math.max(1, b - a)) * gain;
+    pcm[i] = Math.max(-32768, Math.min(32767, Math.round(v * 32767)));
+  }
+  const buf = new ArrayBuffer(44 + pcm.length * 2), dv = new DataView(buf);
+  const w = (p, str) => { for (let i = 0; i < str.length; i++) dv.setUint8(p + i, str.charCodeAt(i)); };
+  w(0, 'RIFF'); dv.setUint32(4, 36 + pcm.length * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, outRate, true);
+  dv.setUint32(28, outRate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); w(36, 'data'); dv.setUint32(40, pcm.length * 2, true);
+  new Int16Array(buf, 44).set(pcm);
+  return new Uint8Array(buf);
+}
+function toB64(bytes){ let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(s); }
+// Whisper sometimes "hears" stock phrases in noise; drop them
+const WH_JUNK = /(продолжение следует|субтитр|редактор|корректор|спасибо за (просмотр|внимание)|подписывайтесь|ставьте лайк|dimatorzok|amara|до новых встреч|ревизия склада запчастей|сотрудник называет)/i;
+function cleanWhisper(t){
+  t = String(t || '').replace(/\s+/g, ' ').trim();
+  if (!t || WH_JUNK.test(t)) return '';
+  if (!/[0-9a-zа-яё]/i.test(t)) return '';
+  return t.replace(/[.!?…]+$/, '');
+}
+let txChain = Promise.resolve(), txWaiting = 0;
+function sendClip(wav){
+  txWaiting++; $('#heard').textContent = 'Распознаю…';
+  const b64 = toB64(wav);
+  txChain = txChain.then(async () => {
+    try {
+      const r = await store.transcribe(b64, 'audio/wav');
+      const text = cleanWhisper(r && r.text);
+      if (text) { $('#heard').textContent = text; handleText(text, []); }
+      else if (txWaiting <= 1) $('#heard').textContent = '…';
+    } catch(e) {
+      if (e && e.code === 'rate_limited') { toast('Лимит ИИ Whisper на сейчас исчерпан — переключаюсь на распознавание Chrome'); speak('Переключаюсь на обычное распознавание'); switchEngineLive('chrome'); }
+      else if (e && e.code === 'login') toast('Войдите заново: сессия истекла');
+      else $('#heard').textContent = 'Не удалось распознать — повторите';
+    } finally { txWaiting--; }
+  });
+}
+function setEngine(v){ engine = v; const sel = $('#engine'); if (sel) sel.value = v; lsSet('rv-engine', v); }
+async function switchEngineLive(v){
+  const was = listening; if (was) stopListening(); setEngine(v); if (was) await startListening();
+}
+$('#engine').addEventListener('change', e => switchEngineLive(e.target.value));
+
 $('#micBtn').addEventListener('click', () => listening ? stopListening() : startListening());
 document.addEventListener('visibilitychange', async () => { if (document.visibilityState === 'visible' && listening) { try { wake = await navigator.wakeLock.request('screen'); } catch(e) {} startRec(); } });
 
@@ -1062,7 +1185,7 @@ function speak(t){
   speakQ = speakQ.then(() => new Promise(done => {
     let finished = false;
     speaking = true;
-    if (listening) { micUI('pause', 'Говорю…'); try { rec.abort(); } catch(e) {} }
+    if (listening) { micUI('pause', 'Говорю…'); pauseRec(); }
     const resume = () => {
       if (finished) return; finished = true; speaking = false;
       if (listening) { micUI('on', 'Слушаю…'); setTimeout(startRec, 300); }
@@ -1343,7 +1466,9 @@ $('#testVoiceBtn').addEventListener('click', testVoice);
 async function boot(){
   $('#aiState').textContent = store.mode === 'cloud' ? '' : 'ИИ работает только с подключённым Supabase';
   $('#demoBanner').hidden = store.mode === 'cloud';
-  if (!SR) $('#micState').textContent = 'Распознавание речи доступно в Google Chrome';
+  setEngine(lsGet('rv-engine', store.mode === 'cloud' ? 'whisper' : 'chrome'));
+  if (store.mode !== 'cloud') { const o = $('#engine option[value=whisper]'); if (o) o.disabled = true; setEngine('chrome'); }
+  if (!SR && engine === 'chrome') $('#micState').textContent = 'Выберите распознавание «ИИ Whisper»';
   let who = null;
   try { who = await store.init(); } catch(e) { toast('Не удалось подключиться: ' + (e.message || e)); }
   if (!who) { $('#loginView').hidden = false; return; }
